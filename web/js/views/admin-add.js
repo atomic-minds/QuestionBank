@@ -101,7 +101,9 @@ function imageTab(host, tax) {
       navigate('/admin/review');
     } catch (e) {
       const fallback = ['AI_DAILY_LIMIT', 'AI_QUOTA_EXHAUSTED', 'AI_NOT_CONFIGURED', 'AI_UNAVAILABLE', 'AI_TIMEOUT', 'AI_BLOCKED', 'AI_BAD_OUTPUT'].includes(e.code);
+      const why = typeof e.details?.provider_message === 'string' ? e.details.provider_message : '';
       host.querySelector('#x-err').innerHTML = html`<div class="notice bad" role="alert"><b>${e.message}</b>
+        ${why ? html`<p class="small">Google said: ${why}</p>` : ''}
         ${fallback ? html`<p class="small">You can try again, or use <a href="/admin/add?tab=json">Paste JSON</a> (you can get the JSON from any AI tool, or write it yourself).</p>` : ''}</div>`.toString();
       go.disabled = false; host.querySelector('#busy').textContent = '';
     }
