@@ -1,0 +1,11 @@
+# Supabase project settings used by the CLI (`npx supabase functions deploy ...`).
+# project_id is only a local label; the real project is chosen with `supabase link`.
+project_id = "question-bank"
+
+# These functions do their own authentication (see supabase/functions/_shared/handlers/auth.js):
+# the caller's token is verified with the Auth server and the caller must be listed in admin_users.
+[functions.extract-question]
+verify_jwt = false
+
+[functions.save-questions]
+verify_jwt = false

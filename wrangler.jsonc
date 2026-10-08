@@ -1,0 +1,11 @@
+// Cloudflare Workers "static assets": serves the website in ./web. There is no Worker script,
+// so nothing runs on Cloudflare's side and nothing can be billed for compute.
+{
+  "name": "question-bank",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./web",
+    // Open /browse/chemistry directly or refresh the page: serve index.html and let the app route it.
+    "not_found_handling": "single-page-application"
+  }
+}
