@@ -26,48 +26,81 @@ export function createGeminiProvider(cfg) {
     id: 'gemini',
     model,
     async extract({ image, system, userText, schema, signal }) {
-      const body = {
+      // Google sometimes rejects a schema style with a bare "invalid argument" (it differs between model
+      // generations). So on that exact error we retry with a simpler request: first the standard JSON
+      // Schema field, then no schema at all (the schema is described in the prompt and the answer is still
+      // fully re-checked by this app). A rejected request is not charged against the free quota.
+      const variants = [
+        { name: 'schema', gen: { responseSchema: schema }, text: userText },
+        { name: 'json-schema', gen: { responseJsonSchema: toJsonSchema(schema) }, text: userText },
+        { name: 'prompt', gen: {}, text: `${userText}\n\nAnswer with ONLY a JSON object that follows this JSON Schema:\n${JSON.stringify(toJsonSchema(schema))}` },
+      ];
+      const buildBody = (v) => ({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{
           role: 'user',
           parts: [
             { inline_data: { mime_type: image.mimeType, data: toBase64(image.bytes) } },
-            { text: userText },
+            { text: v.text },
           ],
         }],
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: schema,
+          ...v.gen,
           temperature: 0.1,
           maxOutputTokens: 8192,
         },
-      };
+      });
 
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const combined = signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : timeout;
-      let res;
-      try {
-        res = await doFetch(`${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
-          body: JSON.stringify(body),
-          signal: combined,
-        });
-      } catch (e) {
-        if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
-          throw new AiError('AI_TIMEOUT', 'The AI took too long to respond. Try again, or use a smaller image.');
+      for (let i = 0; i < variants.length; i++) {
+        const timeout = AbortSignal.timeout(timeoutMs);
+        const combined = signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : timeout;
+        let res;
+        try {
+          res = await doFetch(`${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+            body: JSON.stringify(buildBody(variants[i])),
+            signal: combined,
+          });
+        } catch (e) {
+          if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+            throw new AiError('AI_TIMEOUT', 'The AI took too long to respond. Try again, or use a smaller image.');
+          }
+          throw new AiError('AI_UNAVAILABLE', 'Could not reach the AI service. Try again in a moment.');
         }
-        throw new AiError('AI_UNAVAILABLE', 'Could not reach the AI service. Try again in a moment.');
+
+        let payload = null;
+        const rawText = await res.text();
+        try { payload = JSON.parse(rawText); } catch { /* non-JSON body */ }
+
+        if (!res.ok) {
+          const bareInvalid = res.status === 400 && /invalid argument/i.test(providerMessage(payload) ?? '') && !/api key/i.test(providerMessage(payload) ?? '');
+          if (bareInvalid && i < variants.length - 1) continue;
+          throw mapHttpError(res, payload);
+        }
+        return parseSuccess(payload);
       }
-
-      let payload = null;
-      const rawText = await res.text();
-      try { payload = JSON.parse(rawText); } catch { /* non-JSON body */ }
-
-      if (!res.ok) throw mapHttpError(res, payload);
-      return parseSuccess(payload);
+      throw new AiError('AI_UNAVAILABLE', 'The AI service is having trouble right now. Try again shortly.');
     },
   };
+}
+
+// Gemini-style schema (UPPERCASE types, nullable) -> standard JSON Schema (lowercase, type arrays).
+function toJsonSchema(node) {
+  if (Array.isArray(node)) return node.map(toJsonSchema);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'propertyOrdering' || k === 'nullable') continue;
+    out[k] = k === 'properties' ? Object.fromEntries(Object.entries(v).map(([n, c]) => [n, toJsonSchema(c)])) : toJsonSchema(v);
+  }
+  if (typeof out.type === 'string') {
+    out.type = out.type.toLowerCase();
+    if (node.nullable) out.type = [out.type, 'null'];
+  }
+  if (node.nullable && Array.isArray(out.enum) && !out.enum.includes(null)) out.enum = [...out.enum, null];
+  return out;
 }
 
 function providerMessage(payload) {
