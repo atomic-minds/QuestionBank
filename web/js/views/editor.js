@@ -1,7 +1,7 @@
 // The question editor: one form that adapts to the question type. Used to fix AI mistakes,
 // write questions by hand, and edit saved ones. It edits a QuestionInput (see core/validate.js)
 // and never talks to the server itself.
-import { html } from '../dom.js';
+import { html, confirmDialog } from '../dom.js';
 import { OPTION_LETTERS, QUESTION_TYPES, DIFFICULTIES, STATUSES, LIMITS } from '../core/constants.js';
 import { defaultOptionsFor } from '../core/validate.js';
 import { normalizeTags } from '../core/text.js';
@@ -121,6 +121,16 @@ export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, 
  * @param {HTMLElement} container
  * @param {{draft:any, tax:any, errors?:any[], warnings?:any[], meta?:any, locked?:any}} cfg
  */
+const clip = (t, n = 80) => { const x = String(t ?? '').trim(); return x.length > n ? `${x.slice(0, n)}…` : x; };
+/** True when the draft holds typed work that a type change or "drop options" would throw away. */
+function hasWork(d) {
+  if ((d.options ?? []).some((o) => String(o.text ?? '').trim())) return true;
+  if (String(d.answer?.text ?? '').trim() || String(d.answer?.number ?? '').trim()) return true;
+  if (Object.keys(d.answer?.pairs ?? {}).length) return true;
+  const m = d.match_items;
+  return Boolean(m && ((m.left ?? []).some((x) => String(x.text ?? '').trim()) || (m.right ?? []).some((x) => String(x.text ?? '').trim())));
+}
+
 export function mountEditor(container, cfg) {
   const state = { draft: structuredClone(cfg.draft), errors: cfg.errors ?? [], warnings: cfg.warnings ?? [] };
   const d = state.draft;
@@ -131,7 +141,9 @@ export function mountEditor(container, cfg) {
     const scroll = window.scrollY;
     container.innerHTML = renderEditor(state.draft, { tax: cfg.tax, errors: state.errors, warnings: state.warnings, meta: cfg.meta, locked: cfg.locked ?? {} }).toString();
     window.scrollTo({ top: scroll });
+    lastType = state.draft.type_code;
   };
+  let lastType = state.draft.type_code;
   const intOrNull = (v) => (v === '' || v === null ? null : Number(v));
 
   const sync = (el) => {
@@ -162,32 +174,54 @@ export function mountEditor(container, cfg) {
   };
 
   container.addEventListener('input', (e) => { if (e.target instanceof Element) sync(e.target); });
-  container.addEventListener('change', (e) => {
+  container.addEventListener('change', async (e) => {
     const el = e.target;
     if (!(el instanceof Element)) return;
     sync(el);
     const dr = state.draft;
-    if (el.matches('[data-f=type_code]')) { retype(dr, el.value); state.errors = []; draw(); }
+    if (el.matches('[data-f=type_code]')) {
+      const prev = lastType;
+      const from = QUESTION_TYPES[prev]; const to = QUESTION_TYPES[el.value];
+      const loses = from && to && (from.kind !== to.kind || (prev !== el.value && ['true_false', 'assertion_reason'].includes(el.value)));
+      if (loses && hasWork(dr) && !(await confirmDialog({ title: `Change type to ${to.label}?`, body: 'The options and answer you have entered for the current type will be replaced. The question text stays.', confirmLabel: 'Change type', danger: true }))) { dr.type_code = prev; draw(); return; }
+      retype(dr, el.value); state.errors = []; draw();
+    }
     else if (el.matches('[data-f=subject_id]')) { dr.chapter_id = null; dr.topic_id = null; draw(); }
     else if (el.matches('[data-f=chapter_id]')) { dr.topic_id = null; draw(); }
     else if (el.matches('[data-match]')) draw();
   });
-  container.addEventListener('click', (e) => {
+  container.addEventListener('click', async (e) => {
     const b = e.target instanceof Element ? e.target.closest('[data-act]') : null;
     if (!b) return;
     const dr = state.draft;
     const i = Number(b.dataset.i);
+    const sure = (title, body, confirmLabel = 'Remove') => confirmDialog({ title, body, confirmLabel, danger: true });
     switch (b.dataset.act) {
       case 'add-opt': dr.options.push({ id: OPTION_LETTERS[dr.options.length], text: '' }); break;
-      case 'del-opt':
+      case 'del-opt': {
+        const o = dr.options[i];
+        const label = OPTION_LETTERS[i];
+        const text = clip(o?.text);
+        const lead = text ? `“${text}” will be removed. ` : 'This empty option will be removed. ';
+        const extra = dr.answer?.value === o?.id ? ' It is the marked correct answer, so the correct answer will reset to option A.' : '';
+        if (!(await sure(`Remove option ${label}?`, `${lead}The options after it move up one letter.${extra}`))) return;
         dr.options.splice(i, 1);
         dr.options.forEach((o, k) => { o.id = OPTION_LETTERS[k]; });
         if (!dr.options.some((o) => o.id === dr.answer?.value)) dr.answer = { value: 'A' };
         break;
+      }
       case 'add-exam': dr.exams.push({ exam_id: null, year: '', paper: '' }); break;
-      case 'del-exam': dr.exams.splice(i, 1); break;
+      case 'del-exam': {
+        const ex = dr.exams[i];
+        const nm = (cfg.tax?.exams ?? []).find((x) => x.id === ex?.exam_id)?.name;
+        const what = [nm, ex?.year, ex?.paper].filter(Boolean).join(' ');
+        if (!(await sure('Remove this exam appearance?', what ? `${what} will be removed from this question.` : 'This empty exam row will be removed.'))) return;
+        dr.exams.splice(i, 1); break;
+      }
       case 'add-context': dr.context = ''; break;
-      case 'drop-options': dr.options = null; dr.answer = { text: '' }; break;
+      case 'drop-options':
+        if (hasWork(dr) && !(await sure('Remove all answer options?', 'The options and the marked correct answer will be removed, and you will type a written answer instead.', 'Remove options'))) return;
+        dr.options = null; dr.answer = { text: '' }; break;
       case 'add-options': dr.options = defaultOptionsFor('mcq'); dr.answer = { value: 'A' }; break;
       default: return;
     }

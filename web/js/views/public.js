@@ -23,7 +23,7 @@ export async function home(ctx, app) {
     <h1>Search the question bank.</h1>
     <p class="lede">Every question is reviewed before it is published. Open one, think it through, then check the answer.</p>
     <form class="big-search" action="/search" role="search"><label class="sr" for="home-q">Search questions</label>
-      <input id="home-q" type="search" name="q" placeholder="Try “coordination number” or “QB-CHEM-000241”" autocomplete="off">
+      <input id="home-q" type="search" name="q" placeholder="Search questions or IDs" autocomplete="off">
       <button class="btn-primary" type="submit">Search</button></form>
   </section><div id="home-body" class="loading">Loading…</div></div>`.toString();
   try {

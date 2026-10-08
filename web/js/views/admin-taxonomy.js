@@ -100,6 +100,7 @@ export default async function taxonomyView(ctx, body) {
       if (name && name !== r.name) await attempt(() => api.updateRow(table, r.id, { name }), 'Renamed');
     } else if (act === 'toggle') {
       const { r } = listFor(table, id);
+      if (r.is_active && !(await confirmDialog({ title: `Hide “${r.name}”?`, body: 'It will no longer be offered when adding questions or on the public site. Nothing is deleted, and you can show it again later.', confirmLabel: 'Hide', danger: true }))) return;
       await attempt(() => api.updateRow(table, r.id, { is_active: !r.is_active }), r.is_active ? 'Hidden from pickers' : 'Visible again');
     } else if (act === 'up' || act === 'down') {
       const { r, siblings } = listFor(table, id);

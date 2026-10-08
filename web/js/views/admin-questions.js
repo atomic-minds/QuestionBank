@@ -48,8 +48,8 @@ export default async function list(ctx, body) {
         const s = tax.index.subjectById.get(it.subject_id); const c = tax.index.chapterById.get(it.chapter_id);
         return html`<tr data-pid="${it.public_id}"><td><input type="checkbox" data-sel aria-label="Select ${it.public_id}"></td>
           <td class="nowrap"><a href="/admin/edit/${it.public_id}">${it.public_id}</a></td><td class="q-cell">${short(it.question_text)}</td>
-          <td class="nowrap">${QUESTION_TYPES[it.type_code]?.label}</td><td>${s?.name ?? ''}${c ? html`<br><span class="muted small">${c.name}</span>` : ''}</td>
-          <td><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}</td>
+          <td class="nowrap" data-label="Type">${QUESTION_TYPES[it.type_code]?.label}</td><td data-label="Where">${s?.name ?? ''}${c ? html`<br><span class="muted small">${c.name}</span>` : ''}</td>
+          <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}</td>
           <td class="actions">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button> `)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a></td></tr>`;
       })}</tbody></table></div>
       <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button></div>
@@ -65,7 +65,11 @@ export default async function list(ctx, body) {
   const byPid = (pid) => res.items.find((i) => i.public_id === pid);
   const run = async (list, status) => {
     if (status === 'published' && !(await confirmDialog({ title: `Publish ${list.length} question${list.length === 1 ? '' : 's'}?`, body: 'Published questions are visible to everyone.', confirmLabel: 'Publish' }))) return;
-    if (status === 'archived' && !(await confirmDialog({ title: `Archive ${list.length} question${list.length === 1 ? '' : 's'}?`, body: 'Archived questions are hidden from the public. You can restore them later.', confirmLabel: 'Archive' }))) return;
+    if (status === 'archived' && !(await confirmDialog({ title: `Archive ${list.length} question${list.length === 1 ? '' : 's'}?`, body: 'Archived questions are hidden from the public. You can restore them later.', confirmLabel: 'Archive', danger: true }))) return;
+    if (status !== 'published' && status !== 'archived' && list.some((q) => q.status === 'published')) {
+      const n = list.filter((q) => q.status === 'published').length;
+      if (!(await confirmDialog({ title: `Unpublish ${n} question${n === 1 ? '' : 's'}?`, body: 'They will disappear from the public site until you publish them again.', confirmLabel: 'Unpublish', danger: true }))) return;
+    }
     try {
       const r = await setStatus(list, status);
       toast(`${r.saved} updated${r.failed.length ? `, ${r.failed.length} failed: ${r.failed[0]}` : ''}.`, r.failed.length ? 'bad' : 'ok');
@@ -108,8 +112,12 @@ export async function editPage(ctx, body) {
   const msg = body.querySelector('#msg');
   const saveBtn = body.querySelector('#save');
 
-  async function save(confirmNear = false) {
+  async function save(confirmNear = false, confirmed = false) {
     const value = { ...ed.read(), status: body.querySelector('#st').value };
+    if (q?.status === 'published' && value.status !== 'published' && !confirmed) {
+      const archive = value.status === 'archived';
+      if (!(await confirmDialog({ title: `${archive ? 'Archive' : 'Unpublish'} ${q.public_id}?`, body: 'It will disappear from the public site until you publish it again.', confirmLabel: archive ? 'Archive' : 'Unpublish', danger: true }))) return;
+    }
     if (isNew) { delete value.id; delete value.expected_version; }
     saveBtn.disabled = true; msg.innerHTML = '';
     try {
@@ -123,7 +131,7 @@ export async function editPage(ctx, body) {
       else if (r.code === 'NEAR_DUPLICATE') {
         msg.innerHTML = html`<div class="notice warn" role="alert"><b>${r.message}</b>${r.duplicates.map((d) => html`<div class="dupe"><a href="/admin/edit/${d.public_id}">${d.public_id}</a> (${Math.round(d.similarity * 100)}% similar) ${d.question_text.slice(0, 120)}</div>`)}
           <p><button type="button" id="force">Save anyway</button></p></div>`.toString();
-        msg.querySelector('#force').addEventListener('click', () => save(true));
+        msg.querySelector('#force').addEventListener('click', () => save(true, true));
       } else if (r.code === 'DUPLICATE_EXACT') {
         msg.innerHTML = html`<div class="notice bad" role="alert"><b>${r.message}</b>${(r.duplicates ?? []).map((d) => html`<div class="dupe"><a href="/admin/edit/${d.public_id}">${d.public_id}</a> <span class="badge ${d.status}">${d.status}</span></div>`)}</div>`.toString();
       } else if (r.code === 'CONFLICT') {
