@@ -1,5 +1,6 @@
 // How a question is shown (public pages and admin previews share this).
-import { html } from '../dom.js';
+import { html, rich } from '../dom.js';
+import { isStructureText } from '../core/chem.js';
 import { QUESTION_TYPES } from '../core/constants.js';
 
 const DIFF = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
@@ -37,7 +38,7 @@ export function renderQuestion(q, { index, admin = false } = {}) {
   const marks = q.marks !== null && q.marks !== undefined ? Number(q.marks) : null;
   const ansId = `ans-${q.public_id}`;
   return html`
-  <article class="q" data-pid="${q.public_id}" data-answer-key="${q.answer?.value ?? ''}">
+  <article class="q" data-pid="${q.public_id}" data-qid="${q.id ?? ''}" data-answer-key="${q.answer?.value ?? ''}">
     <div class="q-meta">
       <a class="q-id" href="/q/${q.public_id}">${q.public_id}</a>
       <span class="q-type">${type}</span>
@@ -45,16 +46,16 @@ export function renderQuestion(q, { index, admin = false } = {}) {
       ${marks !== null ? html`<span>${marks} ${marks === 1 ? 'mark' : 'marks'}</span>` : ''}
       ${admin ? html`<span class="badge ${q.status}">${q.status}</span>${q.origin === 'ai_image' ? html`<span class="badge ai">AI</span>` : ''}` : ''}
     </div>
-    ${q.context ? html`<div class="q-context">${q.context}</div>` : ''}
-    <p class="q-text">${q.question_text}</p>
-    ${q.options ? html`<ol class="opts" type="A">${q.options.map((o) => html`<li data-opt="${o.id}"><span class="k">${o.id}.</span><span>${o.text}</span></li>`)}</ol>` : ''}
+    ${q.context ? html`<div class="q-context ${isStructureText(q.context) ? 'struct' : ''}">${rich(q.context)}</div>` : ''}
+    <p class="q-text ${isStructureText(q.question_text) ? 'struct' : ''}">${rich(q.question_text)}</p>
+    ${q.options ? html`<ol class="opts" type="A">${q.options.map((o) => html`<li data-opt="${o.id}"><span class="k">${o.id}.</span><span>${rich(o.text)}</span></li>`)}</ol>` : ''}
     ${q.match_items ? html`<div class="pairs">
-      <div><h4>List I</h4><ol>${q.match_items.left.map((m) => html`<li>${m.id}. ${m.text}</li>`)}</ol></div>
-      <div><h4>List II</h4><ol>${q.match_items.right.map((m) => html`<li>${m.id}. ${m.text}</li>`)}</ol></div></div>` : ''}
+      <div><h4>List I</h4><ol>${q.match_items.left.map((m) => html`<li>${m.id}. ${rich(m.text)}</li>`)}</ol></div>
+      <div><h4>List II</h4><ol>${q.match_items.right.map((m) => html`<li>${m.id}. ${rich(m.text)}</li>`)}</ol></div></div>` : ''}
     <button type="button" class="reveal-btn" data-action="reveal" aria-expanded="false" aria-controls="${ansId}">Show answer</button>
     <div class="answer" id="${ansId}" hidden>
-      <div><span class="lbl">Answer</span><span class="pre">${answerSummary(q)}</span></div>
-      ${q.explanation ? html`<div class="exp"><span class="lbl">Explanation</span>${q.explanation}</div>` : ''}
+      <div><span class="lbl">Answer</span><span class="pre">${rich(answerSummary(q))}</span></div>
+      ${q.explanation ? html`<div class="exp"><span class="lbl">Explanation</span>${rich(q.explanation)}</div>` : ''}
     </div>
     <div class="q-foot">
       ${s ? html`<a href="/browse/${s.slug}">${s.name}</a>` : ''}

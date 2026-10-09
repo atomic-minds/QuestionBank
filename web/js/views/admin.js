@@ -6,7 +6,7 @@ import { errorBox, setTitle } from './public.js';
 
 let verified = false;
 
-const NAV = [['/admin', 'Dashboard'], ['/admin/add', 'Add questions'], ['/admin/review', 'Review drafts'], ['/admin/questions', 'All questions'], ['/admin/taxonomy', 'Taxonomy'], ['/admin/export', 'Export & backup']];
+const NAV = [['/admin', 'Dashboard'], ['/admin/add', 'Add questions'], ['/admin/review', 'Review drafts'], ['/admin/questions', 'All questions'], ['/admin/worksheet', 'Print worksheet'], ['/admin/taxonomy', 'Taxonomy'], ['/admin/export', 'Export & backup']];
 
 export const adminNav = (path) => html`<nav class="admin-nav" aria-label="Admin"><div class="container">
   ${NAV.map(([href, label]) => html`<a href="${href}" ${path === href ? 'aria-current=page' : ''}>${label}</a>`)}
@@ -52,6 +52,7 @@ export async function adminRoute(name, ctx, app) {
       review: () => import('./admin-review.js'),
       questions: () => import('./admin-questions.js'),
       edit: () => import('./admin-questions.js').then((m) => ({ default: m.editPage })),
+      worksheet: () => import('./admin-worksheet.js'),
       taxonomy: () => import('./admin-taxonomy.js'),
       export: () => import('./admin-export.js'),
     }[name])();
@@ -80,6 +81,7 @@ async function dashboard(ctx, body) {
     </div>
     <div class="stats">
       <div class="stat"><b>${stats.ai_used_today}</b>AI image reads today<div class="hint">The count restarts at 12:00 am India time. Reads that Google rejects or fails are not counted. Your daily cap is set by the AI_DAILY_LIMIT secret. Google has its own free limit, which resets at about 12:30 pm IST.</div></div>
+      <div class="stat"><b>${stats.image_count ?? 0}</b>pictures saved<div class="hint">${((stats.image_bytes ?? 0) / 1024 / 1024).toFixed(1)} MB of the database. Each is shrunk to about 20-100 KB.</div></div>
       <div class="stat"><b>${mb.toFixed(1)} MB</b>database size, of 500 MB free<div class="meter" role="img" aria-label="${pct.toFixed(0)} percent of the free database used"><i class="${cls}"></i></div>
         <div class="hint">Adding new questions pauses automatically before the free limit (450 MB unless you changed DB_SOFT_LIMIT_MB). Editing still works.</div></div>
     </div>

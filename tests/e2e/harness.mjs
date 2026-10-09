@@ -161,7 +161,13 @@ async function restApi(req, res, url) {
     let statement;
     if (path.startsWith('rpc/')) {
       const fn = path.slice(4);
-      const args = Object.entries(body ?? {}).map(([k, v]) => `${ident(k)} => ${v === null || v === undefined ? 'null' : lit(typeof v === 'object' ? JSON.stringify(v) : v)}`).join(', ');
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const val = (v) => {
+        if (v === null || v === undefined) return 'null';
+        if (Array.isArray(v) && v.length && v.every((x) => typeof x === 'string' && UUID.test(x))) return lit(`{${v.join(',')}}`);   // uuid[] parameter
+        return lit(typeof v === 'object' ? JSON.stringify(v) : v);
+      };
+      const args = Object.entries(body ?? {}).map(([k, v]) => `${ident(k)} => ${val(v)}`).join(', ');
       statement = `select coalesce(to_json(public.${ident(fn)}(${args}))::text, 'null')`;
     } else {
       const table = `public.${ident(path)}`;
@@ -235,7 +241,7 @@ async function functionsApi(req, res, url) {
 }
 
 // ------------------------------------------------------------------ static site (+ web/_headers)
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
 const WEB = join(ROOT, 'web');
 const globalHeaders = {};
 {

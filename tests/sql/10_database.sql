@@ -43,6 +43,8 @@ begin
   raise exception 'FAIL: % -- expected an error /%/ but the statement succeeded', p_name, p_pattern;
 end $$;
 
+create or replace function test.keys_count(j jsonb) returns int language sql immutable as $$ select count(*)::int from jsonb_object_keys(j) $$;
+
 -- A valid MCQ in Chemistry > Solid State; tests override fields with ||.
 create function test.base() returns jsonb language sql stable as $$
   select jsonb_build_object(
@@ -361,6 +363,7 @@ select test.throws($$select public.qb_save_question(test.base())$$, '42501', 'an
 select test.throws($$select public.qb_find_duplicates('mcq', 'x', null, null, null)$$, '42501', 'anon cannot call qb_find_duplicates');
 select test.throws($$select public.qb_consume_ai_quota(10)$$, '42501', 'anon cannot spend AI quota');
 select test.throws($$select public.qb_admin_stats()$$, '42501', 'anon cannot read admin stats');
+select test.throws($$select public.qb_refund_ai_quota(current_date)$$, '42501', 'anon cannot refund AI quota');
 select test.throws($$select public.qb_next_public_id(1::smallint)$$, '42501', 'anon cannot mint public ids');
 
 :as_user
@@ -373,6 +376,7 @@ select test.throws($$insert into public.subjects (code, name, slug) values ('HAC
 with u as (update public.chapters set name = 'Pwned' returning 1) select test.ok((select count(*) from u) = 0, 'non-admin cannot rename chapters');
 select test.throws($$select public.qb_consume_ai_quota(10)$$, 'QB_FORBIDDEN', 'non-admin cannot spend AI quota');
 select test.throws($$select public.qb_admin_stats()$$, 'QB_FORBIDDEN', 'non-admin cannot read admin stats');
+select test.throws($$select public.qb_refund_ai_quota(current_date)$$, 'QB_FORBIDDEN', 'non-admin cannot refund AI quota');
 select test.throws($$select public.qb_find_duplicates('mcq', 'x', null, null, null)$$, 'QB_FORBIDDEN', 'non-admin cannot probe for duplicates');
 select test.ok((select count(*) from public.admin_users) = 0, 'non-admin cannot see the admin list');
 
@@ -469,6 +473,10 @@ select test.ok(not (public.qb_consume_ai_quota(2) ->> 'allowed')::boolean, 'AI q
 select test.ok((public.qb_admin_stats() ->> 'ai_used_today')::int = 2 and (public.qb_admin_stats() ->> 'db_bytes')::bigint > 0
            and (public.qb_admin_stats() -> 'by_status' ->> 'published')::int = 4, 'admin stats: AI usage, database size and status counts');
 select test.throws($$select public.qb_consume_ai_quota(-1)$$, 'QB_VALIDATION', 'negative AI limit is rejected');
+select test.ok((public.qb_consume_ai_quota(5) ->> 'day')::date = (now() at time zone 'Asia/Kolkata')::date, 'AI quota day follows India time (midnight IST reset)');
+select test.ok((public.qb_refund_ai_quota((now() at time zone 'Asia/Kolkata')::date) ->> 'used')::int = 2, 'AI quota: a failed read can be refunded');
+select test.ok((public.qb_refund_ai_quota('2000-01-01') ->> 'used')::int = 0, 'AI quota: refunding an unknown day is harmless');
+select test.ok((public.qb_admin_stats() ->> 'ai_used_today')::int = 2, 'admin stats reflect the refund');
 
 select test.ok((select count(*) from public.question_exams qe join public.questions q on q.id = qe.question_id where q.public_id = :'pid_henry') = 2, 'henry question has two exam appearances');
 delete from public.questions where public_id = :'pid_henry';
@@ -487,6 +495,42 @@ select test.save_throws('restored id must have the QB format', '{"question_text"
 select test.save_throws('restored id must be unique', '{"question_text":"Same id again?","public_id":"QB-CHEM-000500"}', '23505');
 :as_user
 select test.throws($$select public.qb_register_public_id(1::smallint, 'QB-CHEM-000900')$$, '42501', 'only the trigger can register ids');
+:as_admin
+
+
+-- ============================================================================
+-- 10. Pictures (0007): one optional picture per question
+-- ============================================================================
+select (test.save('{"question_text":"Which structure is drawn below?","status":"published"}'))->>'id' as id_pic_pub \gset
+select (test.save('{"question_text":"A draft with a picture?"}'))->>'id' as id_pic_draft \gset
+select repeat('QUJD', 40) as b64 \gset
+:as_admin
+select test.ok((public.qb_set_question_image(:'id_pic_pub'::uuid, 'image/webp', :'b64') ->> 'bytes')::int = 120, 'picture: admin can attach one (bytes counted)');
+select public.qb_set_question_image(:'id_pic_draft'::uuid, 'image/png', :'b64');
+select public.qb_set_question_image(:'id_pic_pub'::uuid, 'image/jpeg', :'b64');
+select test.ok((public.qb_get_images(array[:'id_pic_pub'::uuid]) -> :'id_pic_pub' ->> 'mime') = 'image/jpeg', 'picture: attaching again replaces it');
+select test.ok((public.qb_admin_stats() ->> 'image_count')::int = 2 and (public.qb_admin_stats() ->> 'image_bytes')::bigint = 240, 'picture: dashboard counts pictures and bytes');
+select test.ok(test.keys_count(public.qb_get_images(array[:'id_pic_pub'::uuid, :'id_pic_draft'::uuid])) = 2, 'picture: admin sees pictures of drafts too');
+:as_anon
+select test.ok((public.qb_get_images(array[:'id_pic_pub'::uuid, :'id_pic_draft'::uuid]) ? :'id_pic_pub') and not (public.qb_get_images(array[:'id_pic_pub'::uuid, :'id_pic_draft'::uuid]) ? :'id_pic_draft'), 'picture: the public sees only pictures of PUBLISHED questions');
+select test.ok(public.qb_get_images(null) = '{}'::jsonb, 'picture: no ids gives nothing');
+select test.throws($$select * from public.question_images$$, '42501', 'picture: the table cannot be read directly by the public');
+select test.throws($$select public.qb_set_question_image('00000000-0000-0000-0000-000000000000'::uuid, 'image/png', repeat('QUJD', 40))$$, '42501', 'picture: the public cannot attach one');
+select test.throws($$select public.qb_clear_question_image('00000000-0000-0000-0000-000000000000'::uuid)$$, '42501', 'picture: the public cannot remove one');
+:as_user
+select test.throws($$select public.qb_set_question_image('00000000-0000-0000-0000-000000000000'::uuid, 'image/png', repeat('QUJD', 40))$$, '42501', 'picture: a signed-in non-admin cannot attach one');
+select test.ok(public.qb_get_images(array[:'id_pic_draft'::uuid]) = '{}'::jsonb, 'picture: a non-admin cannot see a draft picture');
+:as_admin
+select test.throws($$select public.qb_set_question_image('00000000-0000-0000-0000-000000000000'::uuid, 'image/png', repeat('QUJD', 40))$$, 'QB_NOT_FOUND', 'picture: unknown question is refused');
+select test.throws($$select public.qb_set_question_image((select id from public.questions limit 1), 'image/gif', repeat('QUJD', 40))$$, 'QB_VALIDATION', 'picture: only WebP, JPEG and PNG');
+select test.throws($$select public.qb_set_question_image((select id from public.questions limit 1), 'image/png', 'not base64 !!')$$, 'QB_VALIDATION', 'picture: data must be base64');
+select test.throws($$select public.qb_set_question_image((select id from public.questions limit 1), 'image/png', repeat('A', 230000))$$, 'QB_VALIDATION', 'picture: too large is refused');
+select test.throws($$select public.qb_set_question_image((select id from public.questions limit 1), 'image/png', 'QUJD')$$, 'QB_VALIDATION', 'picture: a tiny/empty payload is refused');
+select public.qb_clear_question_image(:'id_pic_draft'::uuid);
+select test.ok(public.qb_get_images(array[:'id_pic_draft'::uuid]) = '{}'::jsonb, 'picture: can be removed');
+delete from public.questions where id = :'id_pic_pub'::uuid;
+reset role;
+select test.ok(not exists (select 1 from public.question_images where question_id = :'id_pic_pub'::uuid), 'picture: deleted with its question');
 :as_admin
 
 -- Marker proving the whole file ran to the end (the harness requires it).

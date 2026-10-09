@@ -1,8 +1,11 @@
 // Tiny rendering helpers. Everything interpolated into html`` is escaped unless it is already
 // "safe" (the result of another html`` call). This is the only way markup is built, so question text
 // from the database can never become markup.
+import { richHtml } from './core/chem.js';
 class Safe { constructor(s) { this.s = s; } toString() { return this.s; } }
 export const raw = (s) => new Safe(String(s ?? ''));
+/** Question text with chemistry formatting (H₂SO₄, Fe³⁺, →). Escaped; only <sub>/<sup> are added. */
+export const rich = (s) => new Safe(richHtml(s));
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC[c]);

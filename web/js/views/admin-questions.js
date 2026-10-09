@@ -108,7 +108,9 @@ export async function editPage(ctx, body) {
       ${q?.status === 'published' ? html`<a class="btn" href="/q/${q.public_id}">View public page</a>` : ''}
       ${q && q.status === 'archived' ? html`<button class="btn-danger" id="del">Delete permanently</button>` : ''}
       ${q ? html`<p class="hint small">Created ${new Date(q.created_at).toLocaleString()}<br>Last changed ${new Date(q.updated_at).toLocaleString()}${q.origin === 'ai_image' ? html`<br>Read from an image by AI` : ''}</p>` : ''}</aside></div>`.toString();
-  const ed = mountEditor(body.querySelector('#ed'), { draft, tax, locked: {} });
+  const existing = q ? ((await api.getImages([q.id], { fresh: true }))[q.id] ?? null) : null;
+  if (ctx.stale()) return;
+  const ed = mountEditor(body.querySelector('#ed'), { draft, tax, locked: {}, image: existing });
   const msg = body.querySelector('#msg');
   const saveBtn = body.querySelector('#save');
 
@@ -123,7 +125,13 @@ export async function editPage(ctx, body) {
     try {
       const r = (await api.saveQuestions('save', [value], { confirmNear })).results[0];
       if (r.ok) {
-        toast(isNew ? `Created ${r.public_id}` : 'Saved', 'ok');
+        const pic = ed.image();
+        let picNote = '';
+        if (pic.changed) {
+          try { if (pic.value) await api.setQuestionImage(r.id, pic.value); else await api.clearQuestionImage(r.id); }
+          catch (err) { picNote = ` The picture could not be saved: ${err.message}`; }
+        }
+        toast(`${isNew ? `Created ${r.public_id}` : 'Saved'}.${picNote}`, picNote ? 'bad' : 'ok');
         if (isNew) navigate(`/admin/edit/${r.public_id}`, { replace: true }); else navigate(location.pathname, { replace: true });
         return;
       }

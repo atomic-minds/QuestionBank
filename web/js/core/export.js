@@ -195,6 +195,7 @@ export function exportFilename(kind, now = new Date()) {
   const stamp = now.toISOString().slice(0, 10);
   if (kind === 'text') return `question-bank-${stamp}.txt`;
   if (kind === 'backup') return `question-bank-backup-${stamp}.json`;
+  if (kind === 'pictures') return `question-bank-pictures-${stamp}.json`;
   return `atomic-minds-questions-${stamp}.json`;
 }
 

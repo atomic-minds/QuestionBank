@@ -26,8 +26,9 @@
   --focus: #2447b5;
   --glass: rgba(255, 255, 255, .92);
   --shadow: 0 1px 2px rgba(15, 30, 60, .05), 0 10px 28px -14px rgba(15, 30, 60, .22);
-  --font-ui: "Bricolage Grotesque", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
-  --font-read: "Literata", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-ui: "Bricolage Grotesque", "Noto Sans Bengali", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-read: "Literata", "Noto Serif Bengali", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-struct: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Bengali", monospace;
   --r-sm: 10px; --r-md: 12px; --r-lg: 18px; --r-xl: 22px;
   --measure: 66ch;
   --tabbar: 64px;
@@ -404,4 +405,73 @@ dialog[open] { animation: pop .18s ease-out; }
   .answer[hidden] { display: block; } .answer::before { clip-path: none; animation: none; }
   .q { box-shadow: none; border-color: #bbb; break-inside: avoid; }
   body { background: #fff; color: #000; }
+}
+
+/* ---- chemistry text: subscripts, superscripts, drawn structures ---- */
+sub, sup { font-size: .72em; line-height: 0; position: relative; vertical-align: baseline; }
+sub { top: .32em; }
+sup { top: -.5em; }
+/* A structure drawn with spaces and | bonds: monospace so the columns stay lined up on every phone. */
+.q-text.struct, .q-context.struct, .struct { font-family: var(--font-struct); font-size: .98rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; padding: .7rem .9rem; background: var(--raised); border: 1px solid var(--rule); border-radius: var(--r-md); }
+.struct sub, .struct sup { font-size: .8em; }
+
+/* ---- pictures with questions ---- */
+.q-fig { margin: 0 0 1rem; max-width: var(--measure); }
+.q-fig img { display: block; max-width: 100%; height: auto; max-height: 420px; border-radius: var(--r-md); border: 1px solid var(--rule); background: #fff; }
+.thumb { display: block; max-width: 160px; max-height: 110px; margin: .5rem 0; border-radius: var(--r-sm); border: 1px solid var(--rule); background: #fff; }
+.pic .q-fig { margin-bottom: .75rem; }
+.rich-prev { margin-top: .5rem; padding: .6rem .8rem; border: 1px dashed var(--rule-strong); border-radius: var(--r-md); font-family: var(--font-read); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-prev[hidden] { display: none; }
+.crop-dialog { width: min(96vw, 720px); }
+.crop-stage { width: 100%; overflow: hidden; border-radius: var(--r-md); background: #000; touch-action: none; }
+.crop-stage canvas { display: block; touch-action: none; cursor: crosshair; max-width: 100%; }
+
+/* ---- several photos in a row ---- */
+.queue { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.queue:empty { display: none; }
+.q-item { display: grid; grid-template-columns: 56px 1fr auto; gap: .75rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--raised); }
+.q-item img { width: 56px; height: 56px; object-fit: cover; border-radius: var(--r-sm); }
+.q-item.reading { border-color: var(--litmus); }
+.q-item.failed, .q-item .e { color: var(--bad); }
+.q-item.done { border-color: var(--ok); }
+
+/* ---- worksheet builder and the printed sheet ---- */
+.checks { display: grid; gap: .5rem; margin: .5rem 0 1rem; }
+.narrow-in { width: 5.5rem; min-height: 40px; }
+label.inline { display: inline; margin: 0 .25rem; }
+.sheet-bar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; }
+.sheet { background: #fff; color: #111; border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 1.5rem 1.25rem; font-family: var(--font-read); line-height: 1.55; }
+.sheet h1 { font-family: var(--font-ui); font-size: 1.6rem; margin: 0 0 .2rem; text-align: center; letter-spacing: -0.02em; }
+.sheet h2 { font-family: var(--font-ui); font-size: 1.2rem; margin: 0 0 .75rem; }
+.sheet-sub { text-align: center; margin: 0 0 .75rem; color: #444; }
+.sheet-meta { display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: space-between; margin: .75rem 0 1.25rem; font-family: var(--font-ui); font-size: .9rem; }
+.sheet-meta i { display: inline-block; min-width: 9rem; border-bottom: 1px solid #111; }
+.sheet-meta i.short { min-width: 3.5rem; }
+.sheet-q { margin: 0; padding-left: 1.6rem; display: grid; gap: 1.1rem; }
+.sq { break-inside: avoid; page-break-inside: avoid; }
+.sq-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sq-text.struct, .sq-ctx.struct { font-family: var(--font-struct); background: none; border: 0; padding: 0; color: #111; }
+.sq-ctx { margin-bottom: .4rem; color: #333; white-space: pre-wrap; }
+.sq-marks { float: right; font-family: var(--font-ui); font-size: .85rem; margin-left: .75rem; }
+.sq-opts { margin: .4rem 0 0; padding-left: 1.5rem; display: grid; gap: .15rem; }
+.sq-fig img { display: block; max-width: 70%; max-height: 240px; margin: .5rem 0; }
+.sq-match { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .4rem; }
+.sq-match ol { margin: .2rem 0 0; padding-left: 1.2rem; }
+.sq-lines { height: calc(var(--n) * 1.9rem); margin-top: .5rem; background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.9rem - 1px), #888 calc(1.9rem - 1px), #888 1.9rem); }
+.sq-id { font-family: var(--font-ui); font-size: .68rem; color: #777; margin-top: .25rem; }
+.sheet-key { margin-top: 2rem; break-before: page; page-break-before: always; }
+.sheet-key ol { padding-left: 1.6rem; display: grid; gap: .35rem; }
+.sk-exp { font-size: .9rem; color: #333; }
+.menu-note { margin: .25rem .75rem .75rem; color: var(--muted); font-size: .88rem; }
+
+@media print {
+  html:root, html:root:not([data-theme="light"]), html:root[data-theme="dark"] {
+    color-scheme: light; --paper: #fff; --surface: #fff; --raised: #fff; --ink: #000; --muted: #333; --rule: #999; --rule-strong: #666;
+  }
+  body { background: #fff; color: #000; display: block; }
+  .site-header, .site-nav, .menu, .menu-scrim, .site-footer, .admin-nav, .no-print, .toasts, .skip { display: none !important; }
+  main, .container { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .sheet { border: 0; border-radius: 0; padding: 0; }
+  a { color: inherit; text-decoration: none; }
+  @page { margin: 14mm; }
 }

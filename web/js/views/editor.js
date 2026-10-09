@@ -1,7 +1,9 @@
 // The question editor: one form that adapts to the question type. Used to fix AI mistakes,
 // write questions by hand, and edit saved ones. It edits a QuestionInput (see core/validate.js)
 // and never talks to the server itself.
-import { html, confirmDialog } from '../dom.js';
+import { html, rich, confirmDialog, toast } from '../dom.js';
+import { isStructureText, richPlain } from '../core/chem.js';
+import { figureFromBlob, figureUrl } from './image-tools.js';
 import { OPTION_LETTERS, QUESTION_TYPES, DIFFICULTIES, STATUSES, LIMITS } from '../core/constants.js';
 import { defaultOptionsFor } from '../core/validate.js';
 import { normalizeTags } from '../core/text.js';
@@ -42,7 +44,9 @@ const sourceNote = (kind, meta) => {
   return text ? html`<div class="notice ${cls}">${text}</div>` : '';
 };
 
-export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, locked = {} }) {
+const needsPreview = (t) => Boolean(t) && (richPlain(t) !== String(t) || isStructureText(t));
+
+export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, locked = {}, image = null, photo = null }) {
   const kind = kindOf(d);
   const def = QUESTION_TYPES[d.type_code];
   const subject = tax.tree.find((s) => s.id === d.subject_id);
@@ -69,7 +73,17 @@ export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, 
       : html`<p><button type="button" class="btn-sm btn-quiet" data-act="add-context">+ Add a passage or case</button></p>`}
 
     <div class="field"><label for="f-text">Question</label>
-      <textarea id="f-text" data-f="question_text" aria-invalid="${bad(errors, 'question_text')}" maxlength="${LIMITS.questionText}">${d.question_text ?? ''}</textarea>${msgs(errors, 'question_text')}${warns(warnings, 'question_text')}</div>
+      <textarea id="f-text" data-f="question_text" aria-invalid="${bad(errors, 'question_text')}" maxlength="${LIMITS.questionText}">${d.question_text ?? ''}</textarea>${msgs(errors, 'question_text')}${warns(warnings, 'question_text')}
+      <div class="rich-prev" data-prev="question_text" ${needsPreview(d.question_text) ? '' : 'hidden'}><span class="muted small">How it will look</span><div class="${isStructureText(d.question_text) ? 'struct' : ''}">${rich(d.question_text ?? '')}</div></div>
+      <p class="hint">Formulas format themselves (H2SO4 shows as H₂SO₄). You can also type H_2O, Fe^{3+}, x^2 and -> for an arrow. To draw a structure, keep each line of it on its own line, lined up with spaces.</p></div>
+
+    <fieldset class="pic" data-pic><legend>Picture <span class="muted small">(optional: a structure, apparatus or graph)</span></legend>
+      ${image ? html`<figure class="q-fig"><img alt="The picture saved with this question" src="${figureUrl(image)}"></figure>
+        <div class="row"><button type="button" class="btn-sm" data-act="pic-add">Replace picture</button>${photo ? html`<button type="button" class="btn-sm" data-act="pic-scan">Crop from the scanned photo</button>` : ''}<button type="button" class="btn-sm btn-quiet" data-act="pic-del">Remove picture</button></div>`
+        : html`${meta?.has_figure ? html`<div class="notice warn">The AI says this question has a figure that cannot be written as text. Add a picture of it.</div>` : ''}
+        <div class="row"><button type="button" class="btn-sm" data-act="pic-add">Add a picture</button>${photo ? html`<button type="button" class="btn-sm" data-act="pic-scan">Crop from the scanned photo</button>` : ''}</div>
+        <p class="hint">Choose a photo or screenshot, then draw a box around the figure. It is shrunk on your device and shown under the question.</p>`}
+    </fieldset>
 
     ${kind === 'choice' ? html`<fieldset><legend>Options — select the correct one</legend>
       ${def.kind === 'any' ? html`<p><button type="button" class="btn-sm" data-act="drop-options">Use a written answer instead</button></p>` : ''}
@@ -133,13 +147,14 @@ function hasWork(d) {
 
 export function mountEditor(container, cfg) {
   const state = { draft: structuredClone(cfg.draft), errors: cfg.errors ?? [], warnings: cfg.warnings ?? [] };
+  const pic = { value: cfg.image ?? null, changed: false };
   const d = state.draft;
   if (d.exams === undefined) d.exams = [];
   if (kindOf(d) === 'numeric') d.answer = { number: d.answer?.number ?? '', unit: d.answer?.unit ?? '', tolerance: d.answer?.tolerance ?? '' };
 
   const draw = () => {
     const scroll = window.scrollY;
-    container.innerHTML = renderEditor(state.draft, { tax: cfg.tax, errors: state.errors, warnings: state.warnings, meta: cfg.meta, locked: cfg.locked ?? {} }).toString();
+    container.innerHTML = renderEditor(state.draft, { tax: cfg.tax, errors: state.errors, warnings: state.warnings, meta: cfg.meta, locked: cfg.locked ?? {}, image: pic.value, photo: cfg.photo ?? null }).toString();
     window.scrollTo({ top: scroll });
     lastType = state.draft.type_code;
   };
@@ -173,7 +188,20 @@ export function mountEditor(container, cfg) {
     }
   };
 
-  container.addEventListener('input', (e) => { if (e.target instanceof Element) sync(e.target); });
+  container.addEventListener('input', (e) => {
+    if (!(e.target instanceof Element)) return;
+    sync(e.target);
+    if (e.target.matches('[data-f=question_text]')) {
+      const box = container.querySelector('[data-prev=question_text]');
+      if (box) {
+        const v = e.target.value;
+        box.hidden = !needsPreview(v);
+        const inner = box.querySelector('div');
+        inner.className = isStructureText(v) ? 'struct' : '';
+        inner.innerHTML = rich(v).toString();
+      }
+    }
+  });
   container.addEventListener('change', async (e) => {
     const el = e.target;
     if (!(el instanceof Element)) return;
@@ -223,6 +251,26 @@ export function mountEditor(container, cfg) {
         if (hasWork(dr) && !(await sure('Remove all answer options?', 'The options and the marked correct answer will be removed, and you will type a written answer instead.', 'Remove options'))) return;
         dr.options = null; dr.answer = { text: '' }; break;
       case 'add-options': dr.options = defaultOptionsFor('mcq'); dr.answer = { value: 'A' }; break;
+      case 'pic-add': {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = 'image/jpeg,image/png,image/webp,image/*';
+        input.addEventListener('change', async () => {
+          const f = input.files?.[0];
+          if (!f) return;
+          try { const fig = await figureFromBlob(f, { title: 'Choose the figure' }); if (fig) { pic.value = fig; pic.changed = true; draw(); } }
+          catch (err) { toast(err.message, 'bad'); }
+        });
+        input.click();
+        return;
+      }
+      case 'pic-scan': {
+        try { const fig = await figureFromBlob(cfg.photo, { title: 'Crop the figure from the scanned photo' }); if (fig) { pic.value = fig; pic.changed = true; draw(); } }
+        catch (err) { toast(err.message, 'bad'); }
+        return;
+      }
+      case 'pic-del':
+        if (!(await sure('Remove the picture?', 'The picture will be removed from this question when you save.', 'Remove picture'))) return;
+        pic.value = null; pic.changed = true; break;
       default: return;
     }
     draw();
@@ -246,6 +294,8 @@ export function mountEditor(container, cfg) {
       return dr;
     },
     show(errors, warnings = state.warnings) { state.errors = errors; state.warnings = warnings; draw(); },
+    /** The picture as it is now, and whether it differs from what was loaded. */
+    image() { return { value: pic.value, changed: pic.changed }; },
   };
 }
 

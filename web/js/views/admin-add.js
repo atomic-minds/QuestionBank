@@ -6,7 +6,7 @@ import { importQuestions } from '../core/importer.js';
 import { LIMITS } from '../core/constants.js';
 import { AI_MAX_QUESTIONS } from '../core/ai/schema.js';
 import { setTitle } from './public.js';
-import { setDrafts } from './drafts.js';
+import { photoStore, setDrafts } from './drafts.js';
 import { prepareImage } from './image-tools.js';
 
 const TABS = [['image', 'From an image'], ['json', 'Paste JSON'], ['manual', 'Write one']];
@@ -60,54 +60,127 @@ export default async function add(ctx, body) {
   else host.innerHTML = html`<div class="panel"><p>Type a question yourself. You choose the type, options and answer, and nothing is sent to an AI.</p><a class="btn btn-primary" href="/admin/edit/new">Start a blank question</a></div>`.toString();
 }
 
+const MAX_PHOTOS = 10;
+const STOP_CODES = new Set(['AI_DAILY_LIMIT', 'AI_QUOTA_EXHAUSTED', 'AI_NOT_CONFIGURED', 'UNAUTHENTICATED']);
+
 function imageTab(host, tax) {
   host.innerHTML = html`<div class="panel stack">
-    <div class="dropzone" id="drop"><p><b>Photo or screenshot of the question(s)</b></p>
-      <p class="muted small">JPEG, PNG or WebP. Up to ${AI_MAX_QUESTIONS} questions per image. The image is shrunk on your device and is not stored.</p>
-      <input type="file" id="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose an image"><div id="pv"></div></div>
+    <div class="dropzone" id="drop"><p><b>Photos or screenshots of the questions</b></p>
+      <p class="muted small">JPEG, PNG or WebP. Choose up to ${MAX_PHOTOS} photos at once; they are read one after another and all the questions land in one review list. Each photo can hold up to ${AI_MAX_QUESTIONS} questions and uses one AI read. Photos are shrunk on your device and are not stored.</p>
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp" multiple aria-label="Choose photos"></div>
+    <ul class="queue" id="queue" aria-live="polite"></ul>
     <div class="grid2"><div class="field"><label for="hint-s">Subject <span class="muted">(helps the AI file it)</span></label>
       <select id="hint-s"><option value="">Let the AI decide</option>${tax.tree.map((s) => html`<option value="${s.id}">${s.name}</option>`)}</select></div>
       <div class="field"><label for="note">Note for the AI <span class="muted">(optional)</span></label><input id="note" type="text" maxlength="300" placeholder="e.g. answers are printed at the bottom"></div></div>
     <div id="x-err"></div>
     <div class="row"><button class="btn-primary" id="go" disabled>Read the questions</button><span class="muted small" id="busy"></span></div>
-    <div class="notice small"><b>Privacy:</b> the image is sent to Google's Gemini service. On Google's free tier, Google may use what you send to improve its products and a person may review it. For private material use <a href="/admin/add?tab=json">Paste JSON</a> instead.</div>
+    <p class="muted small" id="used"></p>
+    <div class="notice small"><b>Privacy:</b> the photos are sent to Google's Gemini service. On Google's free tier, Google may use what you send to improve its products and a person may review it. For private material use <a href="/admin/add?tab=json">Paste JSON</a> instead.</div>
   </div>`.toString();
 
-  let blob = null;
+  /** @type {{id:string,name:string,blob:Blob,url:string,status:'ready'|'reading'|'done'|'failed'|'skipped',msg:string,result:any,code?:string}[]} */
+  const items = [];
+  let running = false;
+  let seq = 0;
   const file = host.querySelector('#file');
   const go = host.querySelector('#go');
-  const pick = async (f) => {
-    if (!f) return;
-    try {
-      blob = await prepareImage(f);
-      host.querySelector('#pv').innerHTML = html`<img class="preview" alt="Preview of the chosen image" src="${URL.createObjectURL(blob)}"><p class="hint">${Math.round(blob.size / 1024)} KB after shrinking</p>`.toString();
-      go.disabled = false;
-      host.querySelector('#x-err').innerHTML = '';
-    } catch (e) { blob = null; go.disabled = true; host.querySelector('#x-err').innerHTML = html`<div class="notice bad" role="alert">${e.message}</div>`.toString(); }
-  };
-  file.addEventListener('change', () => pick(file.files[0]));
+  const queue = host.querySelector('#queue');
+  const busy = host.querySelector('#busy');
+  const err = host.querySelector('#x-err');
+  const STATUS = { ready: 'Ready', reading: 'Reading…', done: '', failed: '', skipped: '' };
+
+  api.adminStats().then((st) => { host.querySelector('#used').textContent = `AI reads used today: ${st.ai_used_today}. The count restarts at 12:00 am India time.`; }).catch(() => {});
+
+  const pending = () => items.filter((i) => i.status === 'ready' || i.status === 'failed' || i.status === 'skipped');
+  function draw() {
+    queue.innerHTML = items.map((it, k) => html`<li class="q-item ${it.status}" data-id="${it.id}"><img alt="" src="${it.url}"><div><b>Photo ${k + 1}</b> <span class="muted small">${it.name}</span>
+      <div class="small ${it.status === 'failed' ? 'e' : 'muted'}">${STATUS[it.status] || it.msg}</div></div>
+      ${running || it.status === 'done' ? '' : html`<button type="button" class="btn-sm btn-quiet" data-rm="${it.id}" aria-label="Remove photo ${k + 1}">Remove</button>`}</li>`).join('');
+    const n = pending().length;
+    go.disabled = running || n === 0;
+    go.textContent = n > 1 ? `Read ${n} photos` : 'Read the questions';
+  }
+  async function add(files) {
+    err.innerHTML = '';
+    const room = MAX_PHOTOS - items.length;
+    const list = [...files];
+    if (list.length > room) toast(`Up to ${MAX_PHOTOS} photos at a time. The first ${Math.max(room, 0)} were added.`);
+    for (const f of list.slice(0, Math.max(room, 0))) {
+      try {
+        const blob = await prepareImage(f);
+        seq += 1;
+        items.push({ id: `p${Date.now()}-${seq}`, name: f.name || `photo ${seq}`, blob, url: URL.createObjectURL(blob), status: 'ready', msg: '', result: null });
+      } catch (e) { err.innerHTML = html`<div class="notice bad" role="alert"><b>${f.name || 'That file'}:</b> ${e.message}</div>`.toString(); }
+    }
+    file.value = '';
+    draw();
+  }
+  file.addEventListener('change', () => add(file.files));
   const drop = host.querySelector('#drop');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
-  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); pick(e.dataTransfer.files[0]); });
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); add(e.dataTransfer.files); });
+  queue.addEventListener('click', (e) => {
+    const b = e.target instanceof Element ? e.target.closest('[data-rm]') : null;
+    if (!b || running) return;
+    const at = items.findIndex((i) => i.id === b.dataset.rm);
+    if (at >= 0) { URL.revokeObjectURL(items[at].url); items.splice(at, 1); draw(); }
+  });
 
   go.addEventListener('click', async () => {
-    go.disabled = true; host.querySelector('#busy').textContent = 'Reading the image… this can take up to a minute.';
-    host.querySelector('#x-err').innerHTML = '';
-    try {
-      const r = await api.extractFromImage(blob, { subjectId: Number(host.querySelector('#hint-s').value) || null, note: host.querySelector('#note').value });
-      setDrafts(r, 'ai');
-      toast(`${r.summary.total} question${r.summary.total === 1 ? '' : 's'} read. Please review them.`, 'ok');
-      navigate('/admin/review');
-    } catch (e) {
-      const fallback = ['AI_DAILY_LIMIT', 'AI_QUOTA_EXHAUSTED', 'AI_NOT_CONFIGURED', 'AI_UNAVAILABLE', 'AI_TIMEOUT', 'AI_BLOCKED', 'AI_BAD_OUTPUT'].includes(e.code);
-      const why = typeof e.details?.provider_message === 'string' ? e.details.provider_message : '';
-      host.querySelector('#x-err').innerHTML = html`<div class="notice bad" role="alert"><b>${e.message}</b>
-        ${why ? html`<p class="small">Google said: ${why}</p>` : ''}
-        ${fallback ? html`<p class="small">You can try again, or use <a href="/admin/add?tab=json">Paste JSON</a> (you can get the JSON from any AI tool, or write it yourself).</p>` : ''}</div>`.toString();
-      go.disabled = false; host.querySelector('#busy').textContent = '';
+    running = true; err.innerHTML = '';
+    const subjectId = Number(host.querySelector('#hint-s').value) || null;
+    const note = host.querySelector('#note').value;
+    const todo = pending();
+    todo.forEach((i) => { i.status = 'ready'; i.msg = ''; });
+    let stopWhy = null;
+    let last = null;
+    for (const [at, it] of todo.entries()) {
+      if (stopWhy) { it.status = 'skipped'; it.msg = `Not read: ${stopWhy}`; continue; }
+      it.status = 'reading'; draw();
+      busy.textContent = todo.length > 1 ? `Reading photo ${at + 1} of ${todo.length}… this can take up to a minute each.` : 'Reading the image… this can take up to a minute.';
+      try {
+        it.result = await api.extractFromImage(it.blob, { subjectId, note });
+        it.status = 'done';
+        it.msg = '';
+        last = it.result.ai?.quota ?? last;
+      } catch (e) {
+        const why = typeof e.details?.provider_message === 'string' && e.details.provider_message ? ` Google said: ${e.details.provider_message}` : '';
+        it.status = 'failed'; it.msg = `${e.message}${why}`; it.code = e.code;
+        if (STOP_CODES.has(e.code)) stopWhy = e.message;
+      }
+      draw();
     }
+    running = false; busy.textContent = '';
+    if (last) host.querySelector('#used').textContent = `AI reads used today: ${last.used} of ${last.limit}. The count restarts at 12:00 am India time.`;
+    const done = items.filter((i) => i.status === 'done');
+    const notRead = items.filter((i) => i.status === 'failed' || i.status === 'skipped');
+    if (!done.length) {
+      draw();
+      const first = notRead[0];
+      const fallback = ['AI_DAILY_LIMIT', 'AI_QUOTA_EXHAUSTED', 'AI_NOT_CONFIGURED', 'AI_UNAVAILABLE', 'AI_TIMEOUT', 'AI_BLOCKED', 'AI_BAD_OUTPUT'].includes(first?.code);
+      err.innerHTML = html`<div class="notice bad" role="alert"><b>${first ? first.msg : 'Nothing could be read.'}</b>
+        ${fallback ? html`<p class="small">You can try again, or use <a href="/admin/add?tab=json">Paste JSON</a> (you can get the JSON from any AI tool, or write it yourself).</p>` : ''}</div>`.toString();
+      return;
+    }
+    const multi = items.length > 1;
+    const merged = { items: [], notes: [], missing: { subjects: [], chapters: [], topics: [] } };
+    for (const it of done) {
+      const n = items.indexOf(it) + 1;
+      photoStore.set(it.id, it.blob);
+      for (const x of it.result.items) merged.items.push({ ...x, photo: multi ? { id: it.id, n } : { id: it.id, n: 1 } });
+      for (const t of it.result.notes ?? []) merged.notes.push(multi ? `Photo ${n}: ${t}` : t);
+      for (const k of ['subjects', 'chapters', 'topics']) for (const m of it.result.missing?.[k] ?? []) {
+        if (!merged.missing[k].some((y) => JSON.stringify(y) === JSON.stringify(m))) merged.missing[k].push(m);
+      }
+    }
+    for (const it of notRead) merged.notes.push(`Photo ${items.indexOf(it) + 1} (${it.name}) was not read: ${it.msg} Add it again from Add questions.`);
+    setDrafts(merged, 'ai');
+    const total = merged.items.length;
+    toast(`${total} question${total === 1 ? '' : 's'} read${multi ? ` from ${done.length} photo${done.length === 1 ? '' : 's'}` : ''}. Please review them.`, 'ok');
+    navigate('/admin/review');
   });
+  draw();
 }
 
 function jsonTab(host, tax) {

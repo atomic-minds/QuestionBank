@@ -1,6 +1,6 @@
 // Export & backup: Atomic Minds JSON, readable plain text, and a full backup that can be restored.
 // Everything is built in the browser from pages of 500 questions, so nothing large is held on a server.
-import { html, on, toast, download } from '../dom.js';
+import { html, on, toast, download, confirmDialog } from '../dom.js';
 import { navigate } from '../router.js';
 import * as api from '../api.js';
 import { QUESTION_TYPES, STATUSES, DIFFICULTIES } from '../core/constants.js';
@@ -12,7 +12,8 @@ import { setTitle } from './public.js';
 const FORMATS = [
   ['am', 'Atomic Minds JSON', 'The versioned file Atomic Minds imports. Keeps each QB ID so questions stay traceable.'],
   ['text', 'Plain text', 'Readable and easy to paste: Q1, options A–D, Ans, Exp.'],
-  ['backup', 'Full backup', 'Everything (all statuses, IDs, taxonomy) so this bank can be restored later or moved.'],
+  ['backup', 'Full backup', 'Everything (all statuses, IDs, taxonomy) so this bank can be restored later or moved. Pictures are not inside it: take a Pictures backup too.'],
+  ['pictures', 'Pictures backup', 'Only the pictures of the chosen questions, in one file (can be large). Restore it after restoring a Full backup.'],
 ];
 const short = (t, n = 110) => (t.length > n ? `${t.slice(0, n)}…` : t);
 
@@ -52,10 +53,16 @@ export default async function exportView(ctx, body) {
           <label><input type="checkbox" name="expl" checked> Include explanations</label><br>
           <label><input type="checkbox" name="ids"> Include QB IDs</label></div>
         <p class="hint" data-for="backup" hidden>A backup always contains every field of every selected question.</p>
+        <p class="hint" data-for="pictures" hidden>Questions without a picture are left out. The file name has the date, so older copies are not overwritten.</p>
       </fieldset>
       <div id="x-msg" role="status"></div>
       <button class="btn-primary" type="submit" id="x-go">Download</button>
     </form>
+
+    <section class="section"><h2>Restore pictures</h2>
+      <div class="panel"><p>Choose a file made by “Pictures backup”. Each picture is put back on the question with the same ID, so restore the questions first. Existing pictures on those questions are replaced.</p>
+        <div class="field"><label for="rp">Pictures file (.json)</label><input id="rp" type="file" accept=".json,application/json"></div>
+        <div id="rp-msg" role="status"></div></div></section>
 
     <section class="section"><h2>Restore a backup</h2>
       <div class="panel"><p>Choose a file made by “Full backup”. You will review it before anything is saved. Questions keep their IDs and statuses.</p>
@@ -131,6 +138,19 @@ export default async function exportView(ctx, body) {
       let skipped = [];
       if (f === 'text') {
         download(exportFilename('text'), buildPlainText(list, { includeAnswers: form.elements.answers.checked, includeExplanations: form.elements.expl.checked, includeIds: form.elements.ids.checked }), 'text/plain');
+      } else if (f === 'pictures') {
+        const pics = {};
+        for (let at = 0; at < list.length; at += 40) {
+          msg.innerHTML = html`<p class="loading">Collecting pictures… ${Math.min(at + 40, list.length)} of ${list.length} questions checked</p>`.toString();
+          const chunk = list.slice(at, at + 40);
+          const got = await api.getImages(chunk.map((q) => q.id), { fresh: true });
+          for (const q of chunk) if (got[q.id]) pics[q.public_id] = got[q.id];
+        }
+        const n = Object.keys(pics).length;
+        if (!n) { bad('None of those questions has a picture, so there is nothing to export.'); return; }
+        download(exportFilename('pictures'), JSON.stringify({ format: 'qb-pictures', version: 1, exported_at: new Date().toISOString(), count: n, pictures: pics }));
+        msg.innerHTML = html`<div class="notice ok">Exported ${n} ${n === 1 ? 'picture' : 'pictures'} from ${list.length} ${list.length === 1 ? 'question' : 'questions'}.</div>`.toString();
+        return;
       } else if (f === 'backup') {
         download(exportFilename('backup'), JSON.stringify(buildBackup(list, idx), null, 2));
       } else {
@@ -142,6 +162,32 @@ export default async function exportView(ctx, body) {
       const done = f === 'am' ? list.length - skipped.length : list.length;
       msg.innerHTML = html`<div class="notice ok">Exported ${done} ${done === 1 ? 'question' : 'questions'}.${skipped.length ? html` <b>${skipped.length}</b> skipped because they have no fixed options: ${skipped.slice(0, 10).map((s) => s.id).join(', ')}${skipped.length > 10 ? '…' : ''}.` : ''}</div>`.toString();
     } catch (err) { bad(err.message); } finally { btn.disabled = false; }
+  });
+
+  body.querySelector('#rp').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    const out = body.querySelector('#rp-msg');
+    if (!file) return;
+    const fail = (m) => { out.innerHTML = html`<div class="notice bad" role="alert">${m}</div>`.toString(); };
+    if (file.size > 60 * 1024 * 1024) { fail('That file is larger than 60 MB. Back up and restore one subject at a time.'); return; }
+    let doc;
+    try { doc = JSON.parse(await file.text()); } catch { fail('That file is not valid JSON.'); return; }
+    const entries = doc?.format === 'qb-pictures' && doc.pictures && typeof doc.pictures === 'object' ? Object.entries(doc.pictures) : null;
+    if (!entries) { fail('That does not look like a Pictures backup file.'); return; }
+    if (!entries.length) { fail('That file has no pictures in it.'); return; }
+    if (!(await confirmDialog({ title: `Restore ${entries.length} picture${entries.length === 1 ? '' : 's'}?`, body: 'Each picture goes onto the question with the same ID and replaces any picture it already has. Questions that are not in this bank are skipped.', confirmLabel: 'Restore pictures' }))) { e.target.value = ''; return; }
+    let ok = 0; const missing = []; const failed = [];
+    for (const [i, [pid, img]] of entries.entries()) {
+      out.innerHTML = html`<p class="loading">Restoring… ${i + 1} of ${entries.length}</p>`.toString();
+      try {
+        const q = await api.getQuestion(String(pid).toUpperCase());
+        if (!q) { missing.push(pid); continue; }
+        await api.setQuestionImage(q.id, { mime: img.mime, data: img.data });
+        ok += 1;
+      } catch (err) { failed.push(`${pid}: ${err.message}`); }
+    }
+    e.target.value = '';
+    out.innerHTML = html`<div class="notice ${failed.length ? 'warn' : 'ok'}">${ok} picture${ok === 1 ? '' : 's'} restored.${missing.length ? html` ${missing.length} skipped because the question is not in this bank (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}).` : ''}${failed.length ? html` ${failed.length} failed: ${failed[0]}` : ''}</div>`.toString();
   });
 
   body.querySelector('#rs').addEventListener('change', async (e) => {

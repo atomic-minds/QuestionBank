@@ -109,6 +109,35 @@ export const getFacets = ({ subject, chapter, topic } = {}) =>
   need().rpc('qb_facets', { p_subject: subject || null, p_chapter: chapter || null, p_topic: topic || null });
 export const searchTaxonomy = (q) => need().rpc('qb_search_taxonomy', { p_q: q });
 
+// ------------------------------------------------------------------ pictures
+const seenImages = new Map();      // question id -> {mime,data} | null (kept for the session so lists do not refetch)
+/** @returns {Promise<Record<string,{mime:string,data:string}>>} only the ids that have a picture */
+export async function getImages(ids, { fresh = false } = {}) {
+  const want = [...new Set(ids.filter(Boolean))];
+  const out = {};
+  const missing = [];
+  for (const id of want) {
+    if (!fresh && seenImages.has(id)) { const v = seenImages.get(id); if (v) out[id] = v; } else missing.push(id);
+  }
+  for (let at = 0; at < missing.length; at += 40) {
+    const chunk = missing.slice(at, at + 40);
+    const db = signedIn() ? await authed() : need();
+    const got = await guard(() => db.rpc('qb_get_images', { p_ids: chunk }));
+    for (const id of chunk) { const v = got?.[id] ?? null; seenImages.set(id, v); if (v) out[id] = v; }
+  }
+  return out;
+}
+export async function setQuestionImage(id, img) {
+  const r = await guard(async () => (await authed()).rpc('qb_set_question_image', { p_question: id, p_mime: img.mime, p_data: img.data }));
+  seenImages.set(id, { mime: img.mime, data: img.data });
+  return r;
+}
+export async function clearQuestionImage(id) {
+  const r = await guard(async () => (await authed()).rpc('qb_clear_question_image', { p_question: id }));
+  seenImages.set(id, null);
+  return r;
+}
+
 // ------------------------------------------------------------------ edge functions
 async function callFunction(name, { json, form } = {}) {
   const t = await token();

@@ -42,7 +42,7 @@ test('AI output becomes reviewable drafts and carries its provenance', () => {
   assert.equal(r.items[0].ok, true, JSON.stringify(r.items[0].errors));
   assert.equal(r.items[0].draft.origin, 'ai_image');
   assert.equal(r.items[0].draft.status, 'draft');
-  assert.deepEqual(r.items[0].meta, { answer_source: 'extracted', explanation_source: 'none', notes: null });
+  assert.deepEqual(r.items[0].meta, { answer_source: 'extracted', explanation_source: 'none', has_figure: false, notes: null });
   assert.equal(r.items[1].ok, false, 'no answer: the admin must choose one');
   assert.deepEqual(r.notes, ['Bottom cropped.']);
   assert.deepEqual(r.summary, { total: 2, valid: 1, invalid: 1, warned: 0 });
@@ -151,4 +151,36 @@ test('provider configuration is checked up front', () => {
   assert.equal(aiStatus(env({})).configured, false);
   assert.deepEqual(aiStatus(env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'some-model' })), { configured: true, provider: 'gemini', model: 'some-model' });
   assert.throws(() => getProvider(env({ AI_PROVIDER: 'mystery' })), { code: 'AI_NOT_CONFIGURED' });
+});
+
+test('a bare "invalid argument" from Google retries with simpler request styles, then succeeds', async () => {
+  const seen = [];
+  let n = 0;
+  const f = async (url, init) => {
+    seen.push(JSON.parse(init.body));
+    n += 1;
+    return n < 3
+      ? new Response(JSON.stringify({ error: { message: 'Request contains an invalid argument.' } }), { status: 400 })
+      : new Response(JSON.stringify(okBody('{"questions":[]}')), { status: 200 });
+  };
+  const out = await make(f).extract(req);
+  assert.deepEqual(out.json, { questions: [] });
+  assert.equal(seen.length, 3);
+  assert.ok(seen[0].generationConfig.responseSchema);
+  const js = seen[1].generationConfig.responseJsonSchema;
+  assert.equal(js.type, 'object');
+  assert.deepEqual(js.properties.questions.items.properties.context.type, ['string', 'null']);
+  assert.equal(JSON.stringify(js).includes('propertyOrdering'), false);
+  assert.equal(seen[2].generationConfig.responseSchema, undefined);
+  assert.match(seen[2].contents[0].parts[1].text, /JSON Schema/);
+});
+
+test('other 400 errors are not retried, and a persistent invalid argument still reports the reason', async () => {
+  const seen = [];
+  await assert.rejects(make(fakeFetch(400, { error: { message: 'bad image' } }, seen)).extract(req), (e) => e.code === 'AI_UNAVAILABLE');
+  assert.equal(seen.length, 1);
+  const seen2 = [];
+  await assert.rejects(make(fakeFetch(400, { error: { message: 'Request contains an invalid argument.' } }, seen2)).extract(req),
+    (e) => e.code === 'AI_UNAVAILABLE' && /invalid argument/.test(e.details.provider_message));
+  assert.equal(seen2.length, 3);
 });

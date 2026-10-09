@@ -115,3 +115,14 @@ Backups are the safety net on the Free plan because Supabase does not take autom
 * a backup (via *Restore a backup*).
 
 Limits: 100 questions and 1 MB per paste. Each question is checked on its own; the invalid ones are listed with a plain reason and the rest can be saved.
+
+## Pictures and chemistry formatting (added with migration 0007)
+
+* **Pictures are not part of the Atomic Minds JSON, the plain text, or the Full backup.** Those files carry the question text only. Take a **Pictures backup** as well (Admin > Export & backup > Pictures backup). It is a separate file, `question-bank-pictures-YYYY-MM-DD.json`:
+
+  ```json
+  { "format": "qb-pictures", "version": 1, "exported_at": "...", "count": 1,
+    "pictures": { "QB-CHEM-000012": { "mime": "image/webp", "data": "<base64>" } } }
+  ```
+  Restore it after restoring the Full backup: each picture goes onto the question with the same ID.
+* **Chemistry formatting is display only.** The stored and exported text is exactly what was typed (`H2SO4`, `Fe^{3+}`, `->`). The website and the printed worksheet show it as H₂SO₄, Fe³⁺ and →.

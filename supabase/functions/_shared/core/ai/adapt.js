@@ -74,6 +74,7 @@ export function adaptAiOutput(json, ctx) {
     item.meta = {
       answer_source: q.answer === null || q.answer === undefined ? 'none' : aSrc,
       explanation_source: q.explanation === null || q.explanation === undefined ? 'none' : eSrc,
+      has_figure: q.has_figure === true,
       notes: typeof q.notes === 'string' && q.notes.trim() ? q.notes.trim().slice(0, 500) : null,
     };
     return item;

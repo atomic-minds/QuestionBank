@@ -6,7 +6,8 @@ import * as api from '../api.js';
 import { QUESTION_TYPES } from '../core/constants.js';
 import { validateQuestionInput } from '../core/validate.js';
 import { setTitle } from './public.js';
-import { clearDrafts, getDrafts, persistDrafts } from './drafts.js';
+import { clearDrafts, figureStore, getDrafts, persistDrafts, photoStore } from './drafts.js';
+import { figureUrl } from './image-tools.js';
 import { mountEditor } from './editor.js';
 
 const short = (t, n = 220) => (t.length > n ? `${t.slice(0, n)}…` : t);
@@ -52,8 +53,11 @@ export default async function review(ctx, body) {
           ${it.meta?.answer_source === 'inferred' ? html`<span class="badge ai">Answer worked out by AI</span>` : ''}
           ${it.meta?.answer_source === 'none' ? html`<span class="badge draft">No answer found</span>` : ''}
           ${it.meta?.explanation_source === 'generated' ? html`<span class="badge ai">Explanation written by AI</span>` : ''}
+          ${figureStore.has(it.key) ? html`<span class="badge published">Picture added</span>` : (it.meta?.has_figure ? html`<span class="badge draft">Has a figure: add a picture</span>` : '')}
+          ${it.photo ? html`<span class="muted small">Photo ${it.photo.n}</span>` : ''}
           ${it.saved ? html`<span class="badge published">Saved as ${it.saved.public_id}</span>` : (it.ok ? html`<span class="badge review">Ready</span>` : html`<span class="badge draft">Needs fixing</span>`)}</div>
         <div class="t pre">${short(it.draft?.question_text ?? '')}</div>
+        ${figureStore.has(it.key) ? html`<img class="thumb" alt="Picture for question ${n}" src="${figureUrl(figureStore.get(it.key))}">` : ''}
         <ul>${it.errors.map((e) => html`<li class="e">${e.message}</li>`)}${it.warnings.map((w) => html`<li class="w">${w.message}</li>`)}
           ${it.saveError ? html`<li class="e">${it.saveError.message}</li>` : ''}</ul>
         ${it.dup.map((d) => html`<div class="dupe">${d.exact ? html`<b>Already in the bank.</b>` : html`<b>Looks similar (${Math.round(d.similarity * 100)}%).</b>`}
@@ -68,7 +72,7 @@ export default async function review(ctx, body) {
     const host = li.querySelector('[data-host]');
     if (!host || !open.has(it.key)) return;
     host.innerHTML = '<div data-ed></div><div class="row"><button type="button" class="btn-primary btn-sm" data-act="apply">Apply changes</button></div>';
-    handles.set(it.key, mountEditor(host.querySelector('[data-ed]'), { draft: it.draft, tax, errors: it.errors, warnings: it.warnings, meta: it.meta }));
+    handles.set(it.key, mountEditor(host.querySelector('[data-ed]'), { draft: it.draft, tax, errors: it.errors, warnings: it.warnings, meta: it.meta, image: figureStore.get(it.key) ?? null, photo: it.photo ? (photoStore.get(it.photo.id) ?? null) : null }));
   }
   const refresh = (it) => {
     const li = body.querySelector(`li[data-key="${it.key}"]`);
@@ -117,6 +121,7 @@ export default async function review(ctx, body) {
     }
     const btn = body.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';
     let saved = 0;
+    const pictures = []; const pictureFails = [];
     for (const confirmNear of [false, true]) {
       const group = chosen.filter((i) => i.confirmNear === confirmNear);
       for (let at = 0; at < group.length; at += 25) {
@@ -125,7 +130,11 @@ export default async function review(ctx, body) {
           const r = await api.saveQuestions('save', chunk.map((i) => (restore ? { ...i.draft } : { ...i.draft, public_id: undefined, status: saveStatus })), { confirmNear });
           r.results.forEach((res, k) => {
             const it = chunk[k];
-            if (res.ok) { it.saved = { public_id: res.public_id, id: res.id }; it.selected = false; it.saveError = null; saved += 1; }
+            if (res.ok) {
+              it.saved = { public_id: res.public_id, id: res.id }; it.selected = false; it.saveError = null; saved += 1;
+              const fig = figureStore.get(it.key);
+              if (fig && !restore) pictures.push(api.setQuestionImage(res.id, fig).catch((err) => { pictureFails.push(`${res.public_id}: ${err.message}`); }));
+            }
             else {
               it.saveError = { code: res.code, message: res.message ?? (res.errors?.[0]?.message ?? 'Could not be saved.') };
               if (res.errors?.length) { it.ok = false; it.errors = res.errors; }
@@ -141,7 +150,9 @@ export default async function review(ctx, body) {
       }
     }
     sess.items.forEach((it) => { const h = handles.get(it.key); if (h && open.has(it.key)) it.draft = h.read(); });
+    await Promise.all(pictures);
     renderAll();
+    if (pictureFails.length) toast(`Saved, but ${pictureFails.length} picture${pictureFails.length === 1 ? '' : 's'} could not be stored: ${pictureFails[0]}`, 'bad');
     const failed = sess.items.filter((i) => i.saveError).length;
     toast(`${saved} saved${failed ? `, ${failed} need attention` : ''}.`, failed ? '' : 'ok');
     if (sess.items.every((i) => i.saved)) { clearDrafts(); toast('All saved.', 'ok'); navigate(`/admin/questions?status=${restore ? '' : saveStatus}`); }
@@ -156,12 +167,14 @@ export default async function review(ctx, body) {
       case 'edit': if (open.has(it.key)) open.delete(it.key); else open.add(it.key); refresh(it); break;
       case 'discard': {
         if (!(await confirmDialog({ title: 'Discard this question?', body: 'It has not been saved and will be removed from this list.', confirmLabel: 'Discard', danger: true }))) break;
-        sess.items.splice(sess.items.indexOf(it), 1); open.delete(it.key);
+        sess.items.splice(sess.items.indexOf(it), 1); open.delete(it.key); figureStore.delete(it.key);
         if (!sess.items.length) { clearDrafts(); navigate('/admin/add'); } else renderAll();
         break;
       }
       case 'apply': {
         const h = handles.get(it.key);
+        const pic = h.image().value;
+        if (pic) figureStore.set(it.key, pic); else figureStore.delete(it.key);
         const v = validateQuestionInput(h.read(), { taxonomy: tax.index.tree, examIds });
         it.draft = v.ok ? v.value : h.read(); it.errors = v.errors; it.warnings = []; it.ok = v.ok; it.saveError = null; it.confirmNear = false;
         if (v.ok) { open.delete(it.key); it.selected = true; await checkDuplicates([it]); if (blocked(it)) it.selected = false; refresh(it); } else { refresh(it); toast('Some fields still need fixing.', 'bad'); }

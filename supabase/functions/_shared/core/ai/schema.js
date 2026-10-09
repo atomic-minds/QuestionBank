@@ -38,6 +38,7 @@ export const AI_QUESTION_PROPERTIES = {
       required: ['exam_id'],
     },
   },
+  has_figure: { type: 'BOOLEAN', description: 'true if the question depends on a drawn figure, structure, graph, apparatus or table-image that cannot be written out as text.' },
   notes: str('Anything the reviewer should know (blurry text, missing figure, uncertain answer). null if nothing.', true),
 };
 

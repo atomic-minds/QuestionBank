@@ -3,6 +3,7 @@ import { html } from './dom.js';
 import { interceptLinks, navigate, notFound, render, route } from './router.js';
 import * as api from './api.js';
 import { bindReveal } from './views/question-view.js';
+import { watchImages } from './views/images.js';
 import { browse, home, questionPage, setTitle } from './views/public.js';
 
 function shell() {
@@ -25,7 +26,15 @@ function shell() {
   });
 }
 
-const ADMIN_LINKS = [['/admin', 'Dashboard'], ['/admin/add', 'Add questions'], ['/admin/review', 'Review drafts'], ['/admin/questions', 'All questions'], ['/admin/taxonomy', 'Taxonomy'], ['/admin/export', 'Export & backup']];
+// ---- install to the home screen ----
+let installEvent = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
+addEventListener('appinstalled', () => { installEvent = null; });
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if ('serviceWorker' in navigator) addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* the site works fine without it */ }); });
+
+const ADMIN_LINKS = [['/admin', 'Dashboard'], ['/admin/add', 'Add questions'], ['/admin/review', 'Review drafts'], ['/admin/questions', 'All questions'], ['/admin/worksheet', 'Print worksheet'], ['/admin/taxonomy', 'Taxonomy'], ['/admin/export', 'Export & backup']];
 
 /** The hamburger menu: every place in the site in one list (phones; hidden on wide screens, which have a full nav bar). */
 function setupMenu() {
@@ -43,7 +52,10 @@ function setupMenu() {
       ${subjects.length ? html`<p class="menu-label">Browse by subject</p><div class="menu-section">${subjects.map((s) => html`<a href="/browse/${s.slug}" ${here() === `/browse/${s.slug}` ? 'aria-current=page' : ''}><span>${s.name}</span><span class="n">${s.count}</span></a>`)}</div>` : ''}
       <p class="menu-label">Admin</p>
       <div class="menu-section">${api.signedIn() ? ADMIN_LINKS.map(([h, l]) => link(h, l)) : link('/admin', 'Admin sign-in')}</div>
-      ${api.signedIn() ? html`<div class="menu-section"><button type="button" class="btn-quiet menu-out" data-menu-signout>Sign out</button></div>` : ''}`.toString();
+      ${api.signedIn() ? html`<div class="menu-section"><button type="button" class="btn-quiet menu-out" data-menu-signout>Sign out</button></div>` : ''}
+      ${isStandalone() ? '' : html`<p class="menu-label">App</p><div class="menu-section">${installEvent
+        ? html`<button type="button" class="btn-quiet menu-out" data-install>Install on this device</button>`
+        : html`<p class="menu-note">${isIos() ? 'To install: tap the Share button, then “Add to Home Screen”.' : 'To install: open your browser menu and choose “Install app” or “Add to Home screen”.'}</p>`}</div>`}`.toString();
   }
   const isOpen = () => !menu.hidden;
   function close(returnFocus = true) {
@@ -65,6 +77,12 @@ function setupMenu() {
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
     if (t.closest('[data-menu-close]')) { close(); return; }
+    if (t.closest('[data-install]') && installEvent) {
+      const ev = installEvent; installEvent = null;
+      close(false);
+      ev.prompt?.();
+      return;
+    }
     if (t.closest('[data-menu-signout]')) {
       close(false);
       const nav = document.querySelector('[data-act=sign-out]');
@@ -88,6 +106,7 @@ document.body.dataset.area = location.pathname.startsWith('/admin') ? 'admin' : 
 shell();
 setupMenu();
 bindReveal(document.getElementById('app'));
+watchImages(document.getElementById('app'));
 route('/', view(home));
 route('/browse', view((ctx, app) => browse({ ...ctx, params: {} }, app)));
 route('/browse/:subject', view(browse));
@@ -104,7 +123,7 @@ const admin = (name) => async (ctx) => {
   return mod.adminRoute(name, ctx, app);
 };
 for (const [pattern, name] of [['/admin', 'dashboard'], ['/admin/add', 'add'], ['/admin/review', 'review'], ['/admin/questions', 'questions'],
-  ['/admin/edit/:id', 'edit'], ['/admin/taxonomy', 'taxonomy'], ['/admin/export', 'export']]) route(pattern, admin(name));
+  ['/admin/edit/:id', 'edit'], ['/admin/worksheet', 'worksheet'], ['/admin/taxonomy', 'taxonomy'], ['/admin/export', 'export']]) route(pattern, admin(name));
 
 notFound((ctx) => {
   setTitle('Not found');
