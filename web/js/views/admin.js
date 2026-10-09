@@ -79,7 +79,7 @@ async function dashboard(ctx, body) {
       <div class="stat"><b>${by.archived ?? 0}</b><a href="/admin/questions?status=archived">archived</a></div>
     </div>
     <div class="stats">
-      <div class="stat"><b>${stats.ai_used_today}</b>AI image reads today<div class="hint">Your daily cap is set by the AI_DAILY_LIMIT secret. Counts reset at midnight Pacific time.</div></div>
+      <div class="stat"><b>${stats.ai_used_today}</b>AI image reads today<div class="hint">The count restarts at 12:00 am India time. Reads that Google rejects or fails are not counted. Your daily cap is set by the AI_DAILY_LIMIT secret. Google has its own free limit, which resets at about 12:30 pm IST.</div></div>
       <div class="stat"><b>${mb.toFixed(1)} MB</b>database size, of 500 MB free<div class="meter" role="img" aria-label="${pct.toFixed(0)} percent of the free database used"><i class="${cls}"></i></div>
         <div class="hint">Adding new questions pauses automatically before the free limit (450 MB unless you changed DB_SOFT_LIMIT_MB). Editing still works.</div></div>
     </div>
