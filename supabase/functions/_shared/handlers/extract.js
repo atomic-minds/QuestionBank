@@ -14,6 +14,8 @@ import { buildResponseSchema } from '../core/ai/schema.js';
 import { adaptAiOutput } from '../core/ai/adapt.js';
 import { requireAdmin } from './auth.js';
 
+const REFUNDABLE = new Set(['AI_UNAVAILABLE', 'AI_NOT_CONFIGURED', 'AI_QUOTA_EXHAUSTED']);
+
 export function dailyLimit(env) {
   const n = Number.parseInt(env('AI_DAILY_LIMIT') ?? '', 10);
   return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1000) : 20;
@@ -56,12 +58,20 @@ export async function handleExtract(req, { env, fetchImpl }) {
   const quota = await db.rpc('qb_consume_ai_quota', { p_limit: limit });
   if (!quota?.allowed) {
     throw new AppError('AI_DAILY_LIMIT',
-      `Today's limit of ${limit} AI image reads has been used. It resets tomorrow (Pacific time). Use Import JSON in the meantime. On the free tier nothing is charged; keep billing switched off.`,
+      `Today's limit of ${limit} AI image reads has been used. It resets at midnight India time (12:00 am IST). Use Import JSON in the meantime. On the free tier nothing is charged; keep billing switched off.`,
       { details: { used: quota?.used, limit } });
   }
 
   const { system, userText } = buildPrompt(taxonomy, { subjectId, note });
-  const { json, usage } = await provider.extract({ image: { mimeType, bytes }, system, userText, schema: buildResponseSchema() });
+  let json; let usage;
+  try {
+    ({ json, usage } = await provider.extract({ image: { mimeType, bytes }, system, userText, schema: buildResponseSchema() }));
+  } catch (e) {
+    // Google refused or failed the request, so it did no useful work: give the read back.
+    // (Timeouts, blocked images and unreadable answers still count: Google may have processed them.)
+    if (REFUNDABLE.has(e?.code)) { try { await db.rpc('qb_refund_ai_quota', { p_day: quota.day }); } catch { /* best effort */ } }
+    throw e;
+  }
   const result = adaptAiOutput(json, { taxonomy });
 
   return {
