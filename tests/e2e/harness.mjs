@@ -177,6 +177,7 @@ async function restApi(req, res, url) {
         if (k === 'select') select = /^[\w,*]+$/.test(v) ? v : '*';
         else if (k === 'order') order = ` order by ${v.split(',').map((o) => { const [c, d] = o.split('.'); return `${ident(c)}${d === 'desc' ? ' desc' : ''}`; }).join(', ')}`;
         else if (v.startsWith('eq.')) where.push(`${ident(k)} = ${lit(v.slice(3))}`);
+        else if (/^in\.\([\w,-]+\)$/.test(v)) where.push(`${ident(k)}::text in (${v.slice(4, -1).split(',').map(lit).join(', ')})`);
         else throw Object.assign(new Error('unsupported filter'), { pg: { code: 'PGRST100', message: `unsupported filter ${k}=${v}` } });
       }
       const w = where.length ? ` where ${where.join(' and ')}` : '';

@@ -190,7 +190,20 @@ export function toInput(q) {
 }
 
 export async function deleteQuestion(id) {
-  return guard(async () => (await authed()).remove('questions', { id: `eq.${id}` }));
+  const r = await deleteQuestions([id]);
+  return r;
+}
+
+/** Delete questions for good (their pictures and exam tags go with them). Returns how many were removed. */
+export async function deleteQuestions(ids) {
+  let removed = 0;
+  for (let at = 0; at < ids.length; at += 40) {
+    const chunk = ids.slice(at, at + 40);
+    const rows = await guard(async () => (await authed()).remove('questions', { id: `in.(${chunk.join(',')})` }));
+    removed += Array.isArray(rows) ? rows.length : 0;
+    for (const id of chunk) seenImages.set(id, null);
+  }
+  return removed;
 }
 
 /**

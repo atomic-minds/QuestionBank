@@ -43,14 +43,25 @@ export function toast(message, kind = '') {
   setTimeout(() => t.remove(), kind === 'bad' ? 9000 : 4500);
 }
 
-export function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false }) {
+/**
+ * Yes/No pop-up. `body` may be text or html``. With `typeToConfirm: 'DELETE'` the red button stays
+ * disabled until the person types that word, which is used for things that cannot be undone.
+ */
+export function confirmDialog({ title, body, confirmLabel = 'Confirm', danger = false, typeToConfirm = null }) {
   return new Promise((resolve) => {
     const d = document.createElement('dialog');
-    d.innerHTML = html`<form method="dialog"><h3>${title}</h3><p>${body}</p>
-      <div class="row"><button class="btn-primary ${danger ? 'btn-danger' : ''}" value="ok">${confirmLabel}</button><button value="cancel">Cancel</button></div></form>`.toString();
+    d.innerHTML = html`<form method="dialog"><h3>${title}</h3><div class="dlg-body">${typeof body === 'string' ? html`<p>${body}</p>` : body}</div>
+      ${typeToConfirm ? html`<div class="field"><label for="cd-type">Type <b>${typeToConfirm}</b> to confirm</label><input id="cd-type" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>` : ''}
+      <div class="row"><button class="btn-primary ${danger ? 'btn-danger' : ''}" value="ok" ${typeToConfirm ? 'disabled' : ''}>${confirmLabel}</button><button value="cancel" formnovalidate>Cancel</button></div></form>`.toString();
     d.addEventListener('close', () => { resolve(d.returnValue === 'ok'); d.remove(); });
     document.body.append(d);
+    if (typeToConfirm) {
+      const input = d.querySelector('#cd-type'); const ok = d.querySelector('button[value=ok]');
+      input.addEventListener('input', () => { ok.disabled = input.value.trim().toUpperCase() !== typeToConfirm.toUpperCase(); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && ok.disabled) e.preventDefault(); });
+    }
     d.showModal();
+    if (typeToConfirm) d.querySelector('#cd-type').focus();
   });
 }
 

@@ -24,6 +24,8 @@ def ctl(**body):
     req = urllib.request.Request(BASE + '/__ctl', data=json.dumps(body).encode(), headers={'content-type': 'application/json'}, method='POST')
     return json.load(urllib.request.urlopen(req))
 
+PUMP = []   # set to the admin page's wait_for_timeout so polling lets Playwright serve the browser's requests
+
 def until(fn, timeout=15, what='condition'):
     """Poll a Python predicate (the page's CSP forbids string-eval, so no wait_for_function)."""
     import time
@@ -33,7 +35,8 @@ def until(fn, timeout=15, what='condition'):
             if fn(): return True
         except Exception:
             pass
-        time.sleep(0.15)
+        if PUMP: PUMP[0](150)
+        else: time.sleep(0.15)
     raise AssertionError(f'timed out waiting for {what}')
 
 def png(path, w=240, h=120):
@@ -83,6 +86,7 @@ def main():
         page.on('console', lambda m: problems.append(f'console.{m.type}: {m.text}') if m.type in ('error',) and 'ERR_FAILED' not in m.text and 'fonts.g' not in m.text and 'Failed to load resource' not in m.text else None)  # 4xx are provoked on purpose; CSP violations and script errors are not
         page.on('dialog', lambda d: d.dismiss())
 
+        PUMP.append(page.wait_for_timeout)
         def go(path): page.goto(BASE + path); page.wait_for_load_state('networkidle')
         def shot(name): page.screenshot(path=f'{SHOTS}/{name}.png', full_page=True)
         def text(): return page.inner_text('body')
@@ -281,8 +285,33 @@ def main():
             t = pub.inner_text('body')
             check('home lists subjects with counts', 'Chemistry' in t and 'Physics' in t)
             shot('06-home')
+            # filter-first browsing: nothing listed until a filter is chosen; dropdowns across the top
+            pgo('/search')
+            check('all-questions page lists nothing until a filter is chosen', pub.locator('article.q').count() == 0 and 'Choose a filter' in pub.inner_text('body'), pub.inner_text('body')[:200])
+            check('filter dropdowns sit across the top and the left filter menu is gone', pub.locator('.fbar select').count() >= 9 and pub.locator('nav.filters, .browse, aside').count() == 0, str(pub.locator('.fbar select').count()))
+            check('chapter and topic dropdowns wait for their parent', pub.locator('#fb-chapter').is_disabled() and pub.locator('#fb-topic').is_disabled())
+            shot('06b-filter-first')
+            pub.select_option('#fb-subject', 'chemistry')
+            until(lambda: pub.locator('article.q').count() > 0, 10, 'subject questions listed')
+            check('choosing a subject lists its questions', '/browse/chemistry' in pub.url and pub.locator('#fb-subject').input_value() == 'chemistry', pub.url)
+            check('chapter dropdown is filled from the chosen subject', 'Some Basic Concepts of Chemistry' in ' '.join(o.text_content() for o in pub.locator('#fb-chapter option').all()))
+            pub.select_option('#fb-chapter', 'some-basic-concepts-of-chemistry')
+            until(lambda: pub.url.endswith('/some-basic-concepts-of-chemistry') and pub.locator('article.q').count() > 0, 10, 'chapter questions listed')
+            check('choosing a chapter narrows the list and fills the topic dropdown', pub.locator('#fb-topic').is_enabled() or pub.locator('#fb-topic option').count() >= 1)
+            pub.select_option('#fb-type', 'numerical')
+            until(lambda: 'type=numerical' in pub.url and pub.locator('article.q').count() == 1, 10, 'type narrowed')
+            check('type dropdown narrows the list', pub.locator('article.q').count() == 1 and 'Molar mass' in pub.inner_text('body'))
+            pub.select_option('#fb-subject', '')
+            until(lambda: '/search' in pub.url and pub.locator('article.q').count() == 0, 10, 'subject cleared')
+            check('clearing the subject resets chapter and topic', '/search' in pub.url and 'chapter' not in pub.url)
+            pub.click('[data-clear]')
+            until(lambda: pub.url.rstrip('/').endswith('/search') and 'Choose a filter' in pub.inner_text('body'), 10, 'cleared')
+            check('Clear all filters returns to the empty start', pub.locator('article.q').count() == 0)
+            pub.fill('#fb-q', 'mole'); pub.press('#fb-q', 'Enter')
+            until(lambda: pub.locator('article.q').count() >= 1, 10, 'search from the bar')
+            check('search box in the filter bar works', 'q=mole' in pub.url)
             pgo('/browse/chemistry')
-            check('subject page lists chapters', 'Some Basic Concepts of Chemistry' in pub.inner_text('body'))
+            check('subject page opens with its questions and the subject chosen in the dropdown', pub.locator('article.q').count() > 0 and pub.locator('#fb-subject').input_value() == 'chemistry')
             pgo('/browse/chemistry/some-basic-concepts-of-chemistry')
             cards = pub.locator('article.q')
             check('chapter page shows published questions only', cards.count() >= 4, str(cards.count()))
@@ -309,8 +338,13 @@ def main():
             pgo('/search?q=zzzzqqqq')
             check('empty search shows a helpful empty state', 'No questions' in pub.inner_text('body') or 'No results' in pub.inner_text('body') or 'No published' in pub.inner_text('body'), pub.inner_text('body')[:200])
             pgo('/browse/chemistry')
-            facets = pub.inner_text('body')
-            check('facets show exam and difficulty filters', 'JEE Main' in facets and ('Easy' in facets or 'easy' in facets), facets[:300])
+            more_opts = ' '.join(o.text_content() for o in pub.locator('#fb-exam option, #fb-difficulty option, #fb-year option, #fb-marks option, #fb-tag option').all())
+            check('More filters holds exam, year, difficulty, marks and tag dropdowns', 'JEE Main' in more_opts and ('Easy' in more_opts or 'Medium' in more_opts), more_opts[:300])
+            pub.click('.fbar-more summary')
+            pub.select_option('#fb-exam', label=[o.text_content() for o in pub.locator('#fb-exam option').all() if 'JEE Main' in o.text_content()][0])
+            until(lambda: 'exam=' in pub.url, 10, 'exam filter applied')
+            until(lambda: pub.locator('article.q').count() >= 1, 10, 'exam rows')
+            check('exam dropdown filters the list', pub.locator('article.q').count() >= 1, pub.url)
 
             # single question page + XSS
             pgo('/search?q=XSS')
@@ -459,7 +493,7 @@ def main():
                     check(f'no horizontal scroll {label} {nm}', ow[0] <= ow[1] + 1, str(ow))
                     if nm in ('home', 'chapter'): pub.screenshot(path=f'{SHOTS}/r-{label}-{nm}.png', full_page=True)
             page.set_viewport_size({'width': 375, 'height': 800})
-            for path, nm in [('/admin', 'dashboard'), ('/admin/questions', 'list'), ('/admin/taxonomy', 'taxonomy'), ('/admin/export', 'export'), ('/admin/add?tab=json', 'add')]:
+            for path, nm in [('/admin', 'dashboard'), ('/admin/questions?status=published', 'list'), ('/admin/taxonomy', 'taxonomy'), ('/admin/export', 'export'), ('/admin/add?tab=json', 'add')]:
                 go(path)
                 ow = page.evaluate('[document.documentElement.scrollWidth, window.innerWidth]')
                 check(f'no page-level horizontal scroll on mobile admin {nm}', ow[0] <= ow[1] + 1, str(ow))
@@ -482,7 +516,7 @@ def main():
                 def mover(label):
                     w = m.evaluate('[document.documentElement.scrollWidth, window.innerWidth]')
                     check(f'phone ({scheme}) no horizontal scroll: {label}', w[0] <= w[1] + 1, str(w))
-                for path, name in [('/', 'home'), ('/browse/chemistry', 'browse'), ('/search?q=mole', 'search'), ('/admin', 'dash'), ('/admin/add', 'add'), ('/admin/questions', 'list'), ('/admin/taxonomy', 'taxonomy'), ('/admin/export', 'export')]:
+                for path, name in [('/', 'home'), ('/search', 'filters'), ('/browse/chemistry', 'browse'), ('/search?q=mole', 'search'), ('/admin', 'dash'), ('/admin/add', 'add'), ('/admin/questions?status=published', 'list'), ('/admin/taxonomy', 'taxonomy'), ('/admin/export', 'export')]:
                     mgo(path); mover(name); mshot(name)
                 mgo('/admin')
                 m.click('#menu-btn'); m.wait_for_selector('#menu:not([hidden])')
@@ -505,7 +539,7 @@ def main():
             dctx2 = browser.new_context(viewport={'width': 1280, 'height': 860}, color_scheme='dark', storage_state=state)
             dctx2.route(re.compile(r'^https?://(?!localhost)'), lambda r: r.abort())
             dp = dctx2.new_page()
-            for path, name in [('/', 'home'), ('/browse/chemistry', 'browse'), ('/admin', 'dash'), ('/admin/questions', 'list')]:
+            for path, name in [('/', 'home'), ('/browse/chemistry', 'browse'), ('/admin', 'dash'), ('/admin/questions?status=published', 'list')]:
                 dp.goto(BASE + path); dp.wait_for_load_state('networkidle'); dp.wait_for_timeout(250)
                 w = dp.evaluate('[document.documentElement.scrollWidth, window.innerWidth]')
                 check(f'desktop no horizontal scroll: {name}', w[0] <= w[1] + 1, str(w))
@@ -647,10 +681,77 @@ def main():
             check('installed shell still opens with no connection', sp.locator('.brand').count() == 1)
             swctx.set_offline(False); swctx.close()
 
+
+            # ------------------------------------------------------------ admin: filter-first list + delete
+            page.set_viewport_size({'width': 1280, 'height': 900})
+            go('/admin/questions')
+            check('admin list shows a prompt, not every question, until a filter is chosen', page.locator('tbody tr').count() == 0 and 'Choose a filter' in text(), text()[:200])
+            check('admin list has dropdown filters across the top', page.locator('.fbar select').count() >= 7 and page.locator('.fbar input[name=marks]').count() == 1)
+            shot('05b-admin-filter-first')
+            page.select_option('#fb-subject', label='Chemistry')
+            until(lambda: page.locator('tbody tr').count() > 0, 10, 'subject rows')
+            check('admin subject dropdown lists that subject (any status)', page.locator('tbody tr').count() > 0 and '/admin/questions' in page.url)
+            check('admin chapter dropdown fills after a subject is chosen', page.locator('#fb-chapter option').count() > 1)
+            page.select_option('#fb-type', 'numerical')
+            until(lambda: 'type=numerical' in page.url and page.locator('tbody tr').count() >= 1, 10, 'type applied')
+            check('admin type dropdown narrows the list', page.locator('tbody tr').count() >= 1)
+            page.click('[data-clear]')
+            until(lambda: page.locator('tbody tr').count() == 0 and 'Choose a filter' in text(), 10, 'admin cleared')
+            check('admin Clear all filters returns to the empty start', page.locator('tbody tr').count() == 0)
+            go('/admin/questions?status=published')
+            check('picking a status tab counts as a filter', page.locator('tbody tr').count() > 0)
+            check('every row has a Delete button', page.locator('tbody tr [data-del]').count() == page.locator('tbody tr').count())
+
+            def qcount(): return int(ctl(sql='select count(*) from public.questions')['out'].strip().split()[-1])
+            before = qcount()
+            pid = page.locator('tbody tr').first.get_attribute('data-pid')
+            go(f'/admin/edit/{pid}')
+            check('edit page of a PUBLISHED question has a Delete button', page.locator('#del').count() == 1 and page.locator('#del').is_visible())
+            page.click('#del'); page.wait_for_selector('dialog[open]')
+            dlg = page.inner_text('dialog')
+            check('delete asks first, names the question, warns it is published and cannot be undone', pid in dlg and 'published' in dlg.lower() and 'cannot be undone' in dlg.lower(), dlg[:300])
+            check('deleting a published question needs the word DELETE typed', page.locator('dialog button[value=ok]').is_disabled())
+            page.fill('#cd-type', 'delet')
+            check('a partly typed word keeps Delete disabled', page.locator('dialog button[value=ok]').is_disabled())
+            page.click('dialog button[value=cancel]'); until(lambda: page.locator('dialog').count() == 0, 5, 'closed')
+            check('Cancel keeps the question', qcount() == before)
+            page.click('#del'); page.wait_for_selector('dialog[open]')
+            page.fill('#cd-type', 'DELETE')
+            check('typing DELETE enables the button', page.locator('dialog button[value=ok]').is_enabled())
+            page.click('dialog button[value=ok]'); page.wait_for_selector('dialog', state='detached', timeout=15000)
+            until(lambda: qcount() == before - 1 and page.url.rstrip('/').endswith('/admin/questions'), 10, 'deleted')
+            check('delete removes the published question for good', qcount() == before - 1 and page.url.rstrip('/').endswith('/admin/questions'), page.url)
+
+            # a draft: single delete from the list row, simple confirmation (no typing)
+            drafted = ctl(sql="update public.questions set status='draft' where id = (select id from public.questions where status='published' order by public_id desc limit 1) returning public_id")['out']
+            dpid = re.search(r'QB-[A-Z]+-\d+', drafted).group(0)
+            go('/admin/questions?status=draft')
+            row = page.locator(f'tr[data-pid="{dpid}"]')
+            check('drafted question shows in the Draft tab with Delete', row.count() == 1 and row.locator('[data-del]').count() == 1)
+            row.locator('[data-del]').click(); page.wait_for_selector('dialog[open]')
+            check('a draft needs only a plain confirmation', page.locator('#cd-type').count() == 0 and dpid in page.inner_text('dialog') and page.locator('dialog button[value=ok]').is_enabled())
+            page.click('dialog button[value=ok]'); page.wait_for_selector('dialog', state='detached', timeout=15000)
+            until(lambda: qcount() == before - 2, 10, 'draft deleted')
+            check('row Delete removes the draft', qcount() == before - 2)
+
+            # bulk delete needs the typed word
+            go('/admin/questions?status=published')
+            two = page.locator('tbody tr [data-sel]')
+            two.nth(0).check(); two.nth(1).check()
+            ids2 = [page.locator('tbody tr').nth(i).get_attribute('data-pid') for i in (0, 1)]
+            page.click('#bdel'); page.wait_for_selector('dialog[open]')
+            check('bulk delete lists the selection and needs DELETE typed', all(i in page.inner_text('dialog') for i in ids2) and page.locator('dialog button[value=ok]').is_disabled())
+            page.fill('#cd-type', 'DELETE'); page.click('dialog button[value=ok]'); page.wait_for_selector('dialog', state='detached', timeout=15000)
+            until(lambda: qcount() == before - 4, 10, 'bulk deleted')
+            check('bulk delete removes every selected question', qcount() == before - 4 and all(ctl(sql=f"select count(*) from public.questions where public_id='{i}'")['out'].strip().endswith('0') for i in ids2))
+            go('/admin/questions?status=published')
+            page.locator('#bdel').click()
+            check('selecting nothing shows a hint instead of a dialog', page.locator('dialog[open]').count() == 0)
+
             # ------------------------------------------------------------ session handling
             go('/admin')
             page.evaluate("(() => { const s = JSON.parse(localStorage.getItem('qb.session')); s.expires_at = 1; localStorage.setItem('qb.session', JSON.stringify(s)); })()")
-            go('/admin/questions')
+            go('/admin/questions?status=published')
             check('expired token is refreshed transparently', page.locator('tbody tr').count() > 0)
             page.click('[data-act=sign-out]')
             page.wait_for_selector('#login')

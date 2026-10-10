@@ -6,6 +6,7 @@ import { QUESTION_TYPES, STATUSES } from '../core/constants.js';
 import { emptyQuestionInput } from '../core/validate.js';
 import { setTitle } from './public.js';
 import { mountEditor } from './editor.js';
+import { bindFilterBar, filterBar } from './filterbar.js';
 
 const PAGE = 50;
 const NEXT = {
@@ -24,42 +25,74 @@ async function setStatus(list, status) {
   return { saved: out.results.length - failed.length, failed: failed.map((r, i) => r.message ?? r.errors?.[0]?.message ?? 'could not be saved') };
 }
 
+const FILTER_KEYS = ['q', 'status', 'subject', 'chapter', 'topic', 'type', 'exam', 'year', 'difficulty', 'marks', 'tag'];
+
+/** The strong "are you sure" for deleting. Typing DELETE is required for several questions or any published one. */
+export function confirmDelete(items) {
+  const many = items.length > 1;
+  const published = items.filter((i) => i.status === 'published').length;
+  const sure = many || published > 0;
+  return confirmDialog({
+    title: many ? `Delete ${items.length} questions permanently?` : `Delete ${items[0].public_id} permanently?`,
+    body: html`${many
+      ? html`<p>${items.slice(0, 6).map((i) => html`<code>${i.public_id}</code> `)}${items.length > 6 ? `and ${items.length - 6} more` : ''}</p>`
+      : html`<p class="q-peek">${short(items[0].question_text, 160)}</p>`}
+      ${published ? html`<p class="warn-line"><b>${many ? `${published} of these are published` : 'This question is published'}</b> and visible to everyone right now.</p>` : ''}
+      <p><b>This cannot be undone.</b> The ${many ? 'questions are' : 'question is'} removed for good, with ${many ? 'their' : 'its'} picture and exam tags. IDs are never reused.</p>
+      <p class="small">Not sure? Press Cancel and use <b>Archive</b> instead (it hides the question and you can restore it), or download a Full backup first.</p>`,
+    confirmLabel: many ? `Delete ${items.length} questions` : 'Delete permanently',
+    danger: true,
+    typeToConfirm: sure ? 'DELETE' : null,
+  });
+}
+
 export default async function list(ctx, body) {
   setTitle('All questions');
   const q = ctx.query;
   const page = Math.max(1, Number.parseInt(q.page ?? '1', 10) || 1);
   const tax = await api.getTaxonomy({ force: true });
   const subject = tax.tree.find((s) => String(s.id) === q.subject);
-  const res = await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, type: q.type, status: q.status, limit: PAGE, offset: (page - 1) * PAGE });
+  const chapter = subject?.chapters.find((c) => String(c.id) === q.chapter);
+  const hasFilter = FILTER_KEYS.some((k) => q[k]);
+  const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, limit: PAGE, offset: (page - 1) * PAGE }) : null;
   if (ctx.stale()) return;
   const link = (p) => withQuery('/admin/questions', { ...q, ...p });
+  const thisYear = new Date().getFullYear();
+  const fields = [
+    { key: 'subject', label: 'Subject', all: 'All subjects', opts: tax.tree.map((s) => ({ value: String(s.id), label: s.name })) },
+    { key: 'chapter', label: 'Chapter', all: 'All chapters', opts: (subject?.chapters ?? []).map((c) => ({ value: String(c.id), label: c.name })), disabledHint: 'Pick a subject first' },
+    { key: 'topic', label: 'Topic', all: 'All topics', opts: (chapter?.topics ?? []).map((t) => ({ value: String(t.id), label: t.name })), disabledHint: 'Pick a chapter first' },
+    { key: 'type', label: 'Question type', all: 'All types', opts: Object.entries(QUESTION_TYPES).map(([c, t]) => ({ value: c, label: t.label })) },
+    { key: 'exam', label: 'Exam', all: 'All exams', more: true, opts: tax.exams.map((e) => ({ value: String(e.id), label: e.name })), disabledHint: 'No exams yet' },
+    { key: 'year', label: 'Year', all: 'Any year', more: true, opts: Array.from({ length: thisYear + 1 - 1989 }, (_, i) => String(thisYear + 1 - i)).map((y) => ({ value: y, label: y })) },
+    { key: 'difficulty', label: 'Difficulty', all: 'Any difficulty', more: true, opts: ['easy', 'medium', 'hard'].map((d) => ({ value: d, label: d[0].toUpperCase() + d.slice(1) })) },
+    { key: 'marks', label: 'Marks', more: true, input: 'number', placeholder: 'e.g. 4' },
+    { key: 'tag', label: 'Tag', more: true, input: 'text', placeholder: 'e.g. units' },
+  ];
 
   body.innerHTML = html`<div class="page-head"><h1>All questions</h1><a class="btn btn-primary" href="/admin/add">Add questions</a></div>
     <nav class="tabs" aria-label="Status">${[['', 'All'], ...STATUSES.map((s) => [s, s[0].toUpperCase() + s.slice(1)])].map(([v, l]) => html`<a href="${link({ status: v || null, page: null })}" ${(q.status ?? '') === v ? 'aria-current=page' : ''}>${l}</a>`)}</nav>
-    <form class="row" action="/admin/questions" id="flt" role="search">
-      <input type="hidden" name="status" value="${q.status ?? ''}">
-      <div class="grow"><label class="sr" for="fq">Search</label><input id="fq" type="search" name="q" value="${q.q ?? ''}" placeholder="Search text or ID"></div>
-      <div><label class="sr" for="fs">Subject</label><select id="fs" name="subject"><option value="">All subjects</option>${tax.tree.map((s) => html`<option value="${s.id}" ${String(s.id) === q.subject ? 'selected' : ''}>${s.name}</option>`)}</select></div>
-      <div><label class="sr" for="fc">Chapter</label><select id="fc" name="chapter"><option value="">All chapters</option>${(subject?.chapters ?? []).map((c) => html`<option value="${c.id}" ${String(c.id) === q.chapter ? 'selected' : ''}>${c.name}</option>`)}</select></div>
-      <div><label class="sr" for="ft">Type</label><select id="ft" name="type"><option value="">All types</option>${Object.entries(QUESTION_TYPES).map(([c, t]) => html`<option value="${c}" ${c === q.type ? 'selected' : ''}>${t.label}</option>`)}</select></div>
-      <button type="submit">Filter</button></form>
-    ${res.items.length ? html`<div class="table-wrap section"><table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all on this page"></th><th>ID</th><th>Question</th><th>Type</th><th>Where</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+    ${filterBar({ fields, values: Object.fromEntries(FILTER_KEYS.filter((k) => k !== 'status').map((k) => [k, q[k]])) })}
+    ${!hasFilter ? html`<div class="pick-prompt section"><h2>Choose a filter to see questions</h2><p class="muted">Pick a status above (for example <b>Review</b>), or use any dropdown, or type a word or an ID and press Search.</p></div>`
+    : res.items.length ? html`<div class="table-wrap section"><table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all on this page"></th><th>ID</th><th>Question</th><th>Type</th><th>Where</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       ${res.items.map((it) => {
         const s = tax.index.subjectById.get(it.subject_id); const c = tax.index.chapterById.get(it.chapter_id);
         return html`<tr data-pid="${it.public_id}"><td><input type="checkbox" data-sel aria-label="Select ${it.public_id}"></td>
           <td class="nowrap"><a href="/admin/edit/${it.public_id}">${it.public_id}</a></td><td class="q-cell">${short(it.question_text)}</td>
           <td class="nowrap" data-label="Type">${QUESTION_TYPES[it.type_code]?.label}</td><td data-label="Where">${s?.name ?? ''}${c ? html`<br><span class="muted small">${c.name}</span>` : ''}</td>
           <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}</td>
-          <td class="actions">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button> `)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a></td></tr>`;
+          <td class="actions"><div class="act">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button>`)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a><button type="button" class="btn-sm btn-danger" data-del>Delete</button></div></td></tr>`;
       })}</tbody></table></div>
-      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button></div>
+      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button><button type="button" class="btn-danger" id="bdel" aria-label="Delete selected questions">Delete…</button></div>
       <div class="pager">${page > 1 ? html`<a class="btn" href="${link({ page: page - 1 })}">Previous</a>` : html`<span></span>`}<span class="muted small">Page ${page}</span>${res.has_more ? html`<a class="btn" href="${link({ page: page + 1 })}">Next</a>` : html`<span></span>`}</div>`
-      : html`<div class="empty-state section"><p><b>No questions match.</b></p><p class="muted">${q.status || q.q || q.subject ? 'Try clearing the filters.' : 'Add your first questions from an image, JSON or by hand.'}</p><a class="btn btn-primary" href="/admin/add">Add questions</a></div>`}`.toString();
+      : html`<div class="empty-state section"><p><b>No questions match.</b></p><p class="muted">Try other dropdown values, or clear the filters.</p><a class="btn btn-primary" href="/admin/add">Add questions</a></div>`}`.toString();
 
-  body.querySelector('#fs')?.addEventListener('change', () => { body.querySelector('#fc').value = ''; body.querySelector('#flt').requestSubmit(); });
-  body.querySelector('#flt')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    navigate(withQuery('/admin/questions', Object.fromEntries(new FormData(e.currentTarget))));
+  bindFilterBar(body, (key, v) => {
+    const next = { ...v };
+    if (key === 'subject') { delete next.chapter; delete next.topic; }
+    if (key === 'chapter') delete next.topic;
+    if (q.status) next.status = q.status;
+    navigate(withQuery('/admin/questions', next));
   });
   body.querySelector('#all')?.addEventListener('change', (e) => body.querySelectorAll('[data-sel]').forEach((c) => { c.checked = e.target.checked; }));
   const byPid = (pid) => res.items.find((i) => i.public_id === pid);
@@ -76,13 +109,24 @@ export default async function list(ctx, body) {
       navigate(location.pathname + location.search, { replace: true });
     } catch (e) { toast(e.message, 'bad'); }
   };
+  const remove = async (list) => {
+    if (!(await confirmDelete(list))) return;
+    try {
+      const n = await api.deleteQuestions(list.map((x) => x.id));
+      toast(`Deleted ${n} question${n === 1 ? '' : 's'}.`, 'ok');
+      navigate(location.pathname + location.search, { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  };
   body.addEventListener('click', (e) => {
-    const b = e.target instanceof Element ? e.target.closest('[data-to]') : null;
+    const t = e.target instanceof Element ? e.target : null;
+    if (!t) return;
+    const b = t.closest('[data-to]');
     if (b) run([byPid(b.closest('tr').dataset.pid)], b.dataset.to);
-    if (e.target instanceof Element && e.target.id === 'bapply') {
+    if (t.closest('[data-del]')) remove([byPid(t.closest('tr').dataset.pid)]);
+    if (t.id === 'bapply' || t.id === 'bdel') {
       const sel = [...body.querySelectorAll('[data-sel]:checked')].map((c) => byPid(c.closest('tr').dataset.pid));
       if (!sel.length) { toast('Select at least one question.'); return; }
-      run(sel, body.querySelector('#bs').value);
+      if (t.id === 'bdel') remove(sel); else run(sel, body.querySelector('#bs').value);
     }
   });
 }
@@ -106,7 +150,7 @@ export async function editPage(ctx, body) {
       <div id="msg"></div>
       <button class="btn-primary" id="save">${isNew ? 'Create question' : 'Save changes'}</button>
       ${q?.status === 'published' ? html`<a class="btn" href="/q/${q.public_id}">View public page</a>` : ''}
-      ${q && q.status === 'archived' ? html`<button class="btn-danger" id="del">Delete permanently</button>` : ''}
+      ${q ? html`<button class="btn-danger" id="del">Delete permanently</button>` : ''}
       ${q ? html`<p class="hint small">Created ${new Date(q.created_at).toLocaleString()}<br>Last changed ${new Date(q.updated_at).toLocaleString()}${q.origin === 'ai_image' ? html`<br>Read from an image by AI` : ''}</p>` : ''}</aside></div>`.toString();
   const existing = q ? ((await api.getImages([q.id], { fresh: true }))[q.id] ?? null) : null;
   if (ctx.stale()) return;
@@ -150,7 +194,7 @@ export async function editPage(ctx, body) {
   }
   saveBtn.addEventListener('click', () => save(false));
   body.querySelector('#del')?.addEventListener('click', async () => {
-    if (!(await confirmDialog({ title: 'Delete permanently?', body: `${q.public_id} will be removed for good. Its ID will not be reused. Export a backup first if you might need it.`, confirmLabel: 'Delete', danger: true }))) return;
-    try { await api.deleteQuestion(q.id); toast('Deleted', 'ok'); navigate('/admin/questions?status=archived'); } catch (e) { toast(e.message, 'bad'); }
+    if (!(await confirmDelete([q]))) return;
+    try { await api.deleteQuestion(q.id); toast(`Deleted ${q.public_id}.`, 'ok'); navigate('/admin/questions'); } catch (e) { toast(e.message, 'bad'); }
   });
 }
