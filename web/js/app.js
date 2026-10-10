@@ -4,6 +4,7 @@ import { interceptLinks, navigate, notFound, render, route } from './router.js';
 import * as api from './api.js';
 import { bindReveal } from './views/question-view.js';
 import { watchImages } from './views/images.js';
+import * as theme from './theme.js';
 import { browse, home, questionPage, setTitle } from './views/public.js';
 
 function shell() {
@@ -11,7 +12,7 @@ function shell() {
   document.getElementById('shell').innerHTML = html`
     <header class="site-header"><div class="container">
       <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">Q</span><span>${api.settings.siteName}</span></a>
-      <button type="button" class="menu-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="header-tools"><button type="button" class="theme-btn" id="theme-btn" aria-label="Switch to dark mode" title="Dark / light mode"><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"/></svg></button><button type="button" class="menu-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button></div>
       <form class="header-search" action="/search" role="search"><label class="sr" for="hq">Search questions</label><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="hq" type="search" name="q" placeholder="Search questions" autocomplete="off"></form>
       <nav class="site-nav" aria-label="Main"><a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg><span>Subjects</span></a><a href="/search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r=".8"/><circle cx="4" cy="12" r=".8"/><circle cx="4" cy="18" r=".8"/></svg><span>All questions</span></a><a class="admin-link" href="/admin" data-nav-admin><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.4 3.1 7.6 7.5 9 4.4-1.4 7.5-4.6 7.5-9V6L12 3z"/></svg><span>Admin</span></a></nav>
     </div></header>
@@ -50,6 +51,8 @@ function setupMenu() {
     menu.innerHTML = html`<div class="menu-head"><b>Menu</b><button type="button" class="btn-quiet btn-sm" data-menu-close aria-label="Close menu">✕</button></div>
       <div class="menu-section">${link('/', 'Subjects')}${link('/search', 'All questions')}</div>
       ${subjects.length ? html`<p class="menu-label">Browse by subject</p><div class="menu-section">${subjects.map((s) => html`<a href="/browse/${s.slug}" ${here() === `/browse/${s.slug}` ? 'aria-current=page' : ''}><span>${s.name}</span><span class="n">${s.count}</span></a>`)}</div>` : ''}
+      <p class="menu-label">Appearance</p>
+      <div class="menu-section seg" role="group" aria-label="Appearance">${[['light', 'Light'], ['dark', 'Dark'], ['', 'Auto']].map(([v, l]) => html`<button type="button" class="btn-quiet" data-theme-set="${v}" aria-pressed="${(theme.getPref() ?? '') === v}">${l}</button>`)}</div>
       <p class="menu-label">Admin</p>
       <div class="menu-section">${api.signedIn() ? ADMIN_LINKS.map(([h, l]) => link(h, l)) : link('/admin', 'Admin sign-in')}</div>
       ${api.signedIn() ? html`<div class="menu-section"><button type="button" class="btn-quiet menu-out" data-menu-signout>Sign out</button></div>` : ''}
@@ -76,6 +79,8 @@ function setupMenu() {
   menu.addEventListener('click', (e) => {
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
+    const th = t.closest('[data-theme-set]');
+    if (th) { theme.setPref(th.dataset.themeSet || null); return; }
     if (t.closest('[data-menu-close]')) { close(); return; }
     if (t.closest('[data-install]') && installEvent) {
       const ev = installEvent; installEvent = null;
@@ -105,6 +110,18 @@ const view = (fn) => (ctx) => {
 document.body.dataset.area = location.pathname.startsWith('/admin') ? 'admin' : 'public';
 shell();
 setupMenu();
+{ // light / dark button in the header
+  const tb = document.getElementById('theme-btn');
+  const paint = (now) => {
+    tb.setAttribute('aria-label', now === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    tb.title = now === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+    tb.dataset.mode = now;
+    document.querySelectorAll('[data-theme-set]').forEach((b) => b.setAttribute('aria-pressed', String((theme.getPref() ?? '') === b.dataset.themeSet)));
+  };
+  tb.addEventListener('click', () => theme.toggle());
+  theme.onChange(paint);
+  theme.apply();
+}
 bindReveal(document.getElementById('app'));
 watchImages(document.getElementById('app'));
 route('/', view(home));

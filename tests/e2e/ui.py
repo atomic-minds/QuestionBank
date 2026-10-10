@@ -682,6 +682,52 @@ def main():
             swctx.set_offline(False); swctx.close()
 
 
+
+            # ------------------------------------------------------------ light / dark switch
+            bg = lambda pg: pg.evaluate("getComputedStyle(document.body).backgroundColor")
+            tctx = browser.new_context(viewport={'width': 1280, 'height': 800}, color_scheme='light'); tctx.route(re.compile(r'^https?://(?!localhost)'), lambda r: r.abort())
+            tp = tctx.new_page(); tp.goto(BASE + '/'); tp.wait_for_load_state('networkidle')
+            light_bg = bg(tp)
+            check('header has a light/dark button (desktop)', tp.locator('#theme-btn').is_visible() and 'dark' in (tp.locator('#theme-btn').get_attribute('aria-label') or '').lower())
+            tp.click('#theme-btn')
+            until(lambda: tp.evaluate("document.documentElement.dataset.theme") == 'dark', 5, 'dark applied')
+            check('toggle switches to dark mode', bg(tp) != light_bg and tp.locator('#theme-btn').get_attribute('aria-label') == 'Switch to light mode', f'{light_bg} -> {bg(tp)}')
+            check('choice is saved in this browser', tp.evaluate("localStorage.getItem('qb.theme')") == 'dark')
+            check('browser colour bar follows the choice', tp.evaluate("[...document.querySelectorAll('meta[name=theme-color]')].every(m => m.content === '#090e14')"))
+            tp.reload(); tp.wait_for_load_state('networkidle')
+            check('dark mode is remembered after reload', tp.evaluate("document.documentElement.dataset.theme") == 'dark' and bg(tp) != light_bg)
+            tp.click('#theme-btn')
+            until(lambda: tp.evaluate("document.documentElement.dataset.theme") == 'light', 5, 'light applied')
+            check('toggle switches back to light mode', bg(tp) == light_bg and tp.locator('#theme-btn').get_attribute('aria-label') == 'Switch to dark mode')
+            tp.goto(BASE + '/admin'); tp.wait_for_load_state('networkidle')
+            check('light/dark button is in the admin header too', tp.locator('#theme-btn').is_visible())
+            tctx.close()
+
+            # device is dark and nothing saved: starts dark, button offers light and overrides the device
+            dd = browser.new_context(viewport={'width': 1280, 'height': 800}, color_scheme='dark'); dd.route(re.compile(r'^https?://(?!localhost)'), lambda r: r.abort())
+            dp = dd.new_page(); dp.goto(BASE + '/'); dp.wait_for_load_state('networkidle')
+            dark_bg = bg(dp)
+            check('with a dark device and no saved choice the site starts dark', dp.evaluate("document.documentElement.dataset.theme") is None and dp.locator('#theme-btn').get_attribute('aria-label') == 'Switch to light mode')
+            dp.click('#theme-btn')
+            until(lambda: dp.evaluate("document.documentElement.dataset.theme") == 'light', 5, 'forced light')
+            check('light can be chosen even when the device is dark', bg(dp) != dark_bg)
+            dd.close()
+
+            # phone: Appearance section in the menu (Light / Dark / Auto)
+            pm = browser.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, is_mobile=True, has_touch=True, color_scheme='light'); pm.route(re.compile(r'^https?://(?!localhost)'), lambda r: r.abort())
+            mp = pm.new_page(); mp.goto(BASE + '/'); mp.wait_for_load_state('networkidle')
+            check('phone header shows both the light/dark and the menu buttons', mp.locator('#theme-btn').is_visible() and mp.locator('#menu-btn').is_visible())
+            mp.click('#menu-btn'); mp.wait_for_selector('#menu:not([hidden])')
+            check('menu has an Appearance section with Light, Dark and Auto', mp.locator('[data-theme-set]').count() == 3)
+            mp.click('[data-theme-set=dark]')
+            until(lambda: mp.evaluate("document.documentElement.dataset.theme") == 'dark', 5, 'menu dark')
+            check('menu Dark button switches the site and shows as chosen', mp.locator('[data-theme-set=dark]').get_attribute('aria-pressed') == 'true' and mp.locator('[data-theme-set=light]').get_attribute('aria-pressed') == 'false')
+            mp.click('[data-theme-set=""]')
+            until(lambda: mp.evaluate("document.documentElement.dataset.theme") is None, 5, 'menu auto')
+            check('Auto goes back to the device setting and forgets the choice', mp.evaluate("localStorage.getItem('qb.theme')") is None and mp.locator('[data-theme-set=""]').get_attribute('aria-pressed') == 'true')
+            mp.screenshot(path=f'{SHOTS}/m-theme-menu.png')
+            pm.close()
+
             # ------------------------------------------------------------ admin: filter-first list + delete
             page.set_viewport_size({'width': 1280, 'height': 900})
             go('/admin/questions')
