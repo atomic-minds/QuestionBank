@@ -14,6 +14,7 @@ import { AppError } from '../errors.js';
  * @property {string} id
  * @property {string} model
  * @property {(req: ExtractRequest) => Promise<{json: any, usage?: any}>} extract
+ * @property {(req: {system: string, userText: string, schema: object, signal?: AbortSignal}) => Promise<{json: any, usage?: any}>} solve   text only
  */
 
 /** Errors callers can show verbatim. `code` is one of the AI_* codes in errors.js. */

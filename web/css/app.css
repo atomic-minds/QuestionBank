@@ -385,9 +385,9 @@ dialog[open] { animation: pop .18s ease-out; }
   .table-wrap td[data-label]::before { content: attr(data-label); display: block; font-size: .72rem; color: var(--muted); font-weight: 600; margin-bottom: .05rem; }
   .table-wrap td.actions { white-space: normal; display: flex; flex-wrap: wrap; gap: .45rem; padding-top: .6rem; margin-top: .45rem; border-top: 1px solid var(--rule); }
   #bulk { position: sticky; bottom: 0; background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); padding: .7rem 0 calc(.7rem + env(safe-area-inset-bottom)); border-top: 1px solid var(--rule); z-index: 6; }
-  #bulk { flex-wrap: nowrap; gap: .5rem; }
+  #bulk { flex-wrap: wrap; gap: .5rem; }
   #bulk label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  #bulk select { flex: 1; min-width: 0; }
+  #bulk select { flex: 1 1 100%; min-width: 0; }
   #bulk button { flex: none; padding-inline: .8rem; }
 }
 
@@ -499,3 +499,15 @@ dialog .field { margin-top: .9rem; }
 .menu-section.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; padding: 0 .6rem .4rem; }
 .menu-section.seg button { justify-content: center; border: 1px solid var(--rule); background: var(--surface); min-height: 42px; }
 .menu-section.seg button[aria-pressed="true"] { background: var(--litmus-wash); border-color: var(--litmus); color: var(--litmus); font-weight: 650; }
+
+/* ---- maths (KaTeX) ---- */
+.math { white-space: normal; }
+.math-block { display: block; margin: .6rem 0; overflow-x: auto; overflow-y: hidden; padding: .15rem 0; }
+.math:not(.math-block) { overflow-wrap: normal; }
+.katex { font-size: 1.06em; }
+.katex-display { margin: .4rem 0; overflow-x: auto; overflow-y: hidden; }
+.pre .math-block, .q-text .math-block, .answer .math-block { max-width: 100%; }
+
+/* "Solve with AI" bar in the editor */
+.solve-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin: .25rem 0 1rem; }
+.solve-bar .hint { margin: 0; flex: 1 1 14rem; }

@@ -9,6 +9,7 @@ import { setTitle } from './public.js';
 import { clearDrafts, figureStore, getDrafts, persistDrafts, photoStore } from './drafts.js';
 import { figureUrl } from './image-tools.js';
 import { mountEditor } from './editor.js';
+import { applySolution, hasAnswer, solvable, solveMany, solvedMeta, summarize } from './solve.js';
 
 const short = (t, n = 220) => (t.length > n ? `${t.slice(0, n)}…` : t);
 
@@ -64,7 +65,7 @@ export default async function review(ctx, body) {
           <a href="/admin/edit/${d.public_id}">${d.public_id}</a> <span class="badge ${d.status}">${d.status}</span> — ${short(d.question_text, 120)}</div>`)}
         ${it.dup.some((d) => !d.exact) && !blocked(it) && !it.saved ? html`<label class="check"><input type="checkbox" data-act="near" ${it.confirmNear ? 'checked' : ''}> This is a different question; save it anyway</label>` : ''}
       </div>
-      <div class="row">${it.saved ? '' : html`<button type="button" class="btn-sm" data-act="edit">${open.has(it.key) ? 'Close' : 'Edit'}</button><button type="button" class="btn-sm btn-quiet" data-act="discard">Discard</button>`}</div></div>
+      <div class="row">${it.saved ? '' : html`<button type="button" class="btn-sm" data-act="edit">${open.has(it.key) ? 'Close' : 'Edit'}</button><button type="button" class="btn-sm" data-act="solve">Solve with AI</button><button type="button" class="btn-sm btn-quiet" data-act="discard">Discard</button>`}</div></div>
       <div class="panel" data-host ${open.has(it.key) ? '' : 'hidden'}></div></li>`;
   }
 
@@ -96,7 +97,7 @@ export default async function review(ctx, body) {
 
   function renderAll() {
     body.innerHTML = html`<div class="page-head"><div><h1>Review drafts</h1><p class="muted" id="sum"></p></div>
-      <div class="row"><button type="button" class="btn-sm" data-act="all">Select all ready</button><button type="button" class="btn-sm" data-act="none">Select none</button><button type="button" class="btn-sm btn-danger" data-act="clear">Discard all</button></div></div>
+      <div class="row"><button type="button" class="btn-sm" data-act="all">Select all ready</button><button type="button" class="btn-sm" data-act="none">Select none</button><button type="button" class="btn-sm" data-act="solve-all">Solve with AI…</button><button type="button" class="btn-sm btn-danger" data-act="clear">Discard all</button></div></div>
       ${sess.notes.map((n) => html`<div class="notice warn">${n}</div>`)}
       ${sess.missing && (sess.missing.chapters.length || sess.missing.topics.length || sess.missing.subjects.length) ? html`<div class="notice warn"><b>Some names are not in your taxonomy yet.</b>
         ${[...sess.missing.subjects.map((x) => `subject “${x}”`), ...sess.missing.chapters.map((x) => `chapter “${x.name}”`), ...sess.missing.topics.map((x) => `topic “${x.name}”`)].join(', ')}.
@@ -111,6 +112,55 @@ export default async function review(ctx, body) {
     summary();
   }
 
+  /** Put the AI's answer into an item and check the item again. */
+  function takeSolution(it, sol, keepExplanation) {
+    it.draft = applySolution(it.draft, sol, { keepExplanation });
+    it.meta = solvedMeta(it.meta, sol);
+    const v = validateQuestionInput(it.draft, { taxonomy: tax.index.tree, examIds });
+    it.draft = v.ok ? v.value : it.draft; it.errors = v.errors; it.warnings = []; it.ok = v.ok; it.saveError = null;
+    it.selected = it.ok && !blocked(it);
+  }
+  const keepsPrintedExplanation = (it) => it.meta?.explanation_source === 'extracted' || (!it.meta && String(it.draft.explanation ?? '').trim());
+  const solveBusy = new Set();
+
+  async function solveOne(it) {
+    if (solveBusy.size) { toast('Please wait, the AI is still working.'); return; }
+    const h = handles.get(it.key);
+    if (h && open.has(it.key)) it.draft = h.read();            // keep what was typed in the open editor
+    const why = solvable(it.draft);
+    if (why) { toast(why, 'bad'); return; }
+    const printed = it.meta?.answer_source === 'extracted' || (!it.meta && hasAnswer(it.draft));
+    if (printed && !(await confirmDialog({ title: 'Replace the answer?', body: 'This answer was already given in your source. The AI will replace it, and the explanation, with its own.', confirmLabel: 'Solve with AI' }))) return;
+    solveBusy.add(it.key);
+    const btn = body.querySelector(`li[data-key="${it.key}"] [data-act=solve]`);
+    if (btn) { btn.disabled = true; btn.textContent = 'Solving…'; }
+    const r = await solveMany([{ key: it.key, draft: it.draft }]);
+    solveBusy.delete(it.key);
+    const sol = r.solved.get(it.key);
+    if (sol) takeSolution(it, sol, false);
+    open.delete(it.key);
+    refresh(it);
+    if (sol) toast(sol.confident ? 'Solved. Please read the answer and the steps.' : 'Solved, but the AI is not sure. Check it carefully.', sol.confident ? 'ok' : '');
+    else toast(r.stopped?.message ?? r.failed.get(it.key) ?? 'The AI could not solve it.', 'bad');
+  }
+
+  async function solveAll() {
+    if (solveBusy.size) { toast('Please wait, the AI is still working.'); return; }
+    sess.items.forEach((it) => { const h = handles.get(it.key); if (h && open.has(it.key) && !it.saved) it.draft = h.read(); });
+    const targets = sess.items.filter((i) => !i.saved && !solvable(i.draft) && (i.meta ? i.meta.answer_source !== 'extracted' : !hasAnswer(i.draft)));
+    if (!targets.length) { toast('Every question here already has an answer from your source.'); return; }
+    const calls = Math.ceil(targets.length / 5);
+    if (!(await confirmDialog({ title: `Solve ${targets.length} question${targets.length === 1 ? '' : 's'} with AI?`, body: `The AI will write an answer and a step-by-step solution for each. Answers that were printed in your source are left alone. This uses ${calls} of today's AI uses and can take a few minutes. You still review everything before saving.`, confirmLabel: 'Solve' }))) return;
+    const all = body.querySelector('[data-act=solve-all]');
+    all.disabled = true;
+    targets.forEach((i) => solveBusy.add(i.key));
+    const r = await solveMany(targets.map((i) => ({ key: i.key, draft: i.draft })), { onProgress: (n, total) => { all.textContent = `Solving… ${n}/${total}`; } });
+    targets.forEach((i) => solveBusy.delete(i.key));
+    for (const it of targets) { const sol = r.solved.get(it.key); if (sol) { takeSolution(it, sol, keepsPrintedExplanation(it)); open.delete(it.key); } else if (r.failed.has(it.key)) it.saveError = { code: 'AI', message: r.failed.get(it.key) }; }
+    renderAll();
+    toast(summarize(r), r.stopped || r.failed.size ? 'bad' : 'ok');
+  }
+
   async function save() {
     const chosen = sess.items.filter((i) => i.selected && i.ok && !i.saved && !blocked(i));
     if (!chosen.length) return;
@@ -121,7 +171,7 @@ export default async function review(ctx, body) {
     }
     const btn = body.querySelector('[data-act=save]'); btn.disabled = true; btn.textContent = 'Saving…';
     let saved = 0;
-    const pictures = []; const pictureFails = [];
+    const pictures = []; const pictureFails = []; const flagFails = [];
     for (const confirmNear of [false, true]) {
       const group = chosen.filter((i) => i.confirmNear === confirmNear);
       for (let at = 0; at < group.length; at += 25) {
@@ -133,6 +183,7 @@ export default async function review(ctx, body) {
             if (res.ok) {
               it.saved = { public_id: res.public_id, id: res.id }; it.selected = false; it.saveError = null; saved += 1;
               const fig = figureStore.get(it.key);
+              if (!restore && (it.meta?.answer_source === 'inferred' || it.meta?.explanation_source === 'generated')) pictures.push(api.setAiCheck(res.id, true).catch(() => { flagFails.push(res.public_id); }));
               if (fig && !restore) pictures.push(api.setQuestionImage(res.id, fig).catch((err) => { pictureFails.push(`${res.public_id}: ${err.message}`); }));
             }
             else {
@@ -153,6 +204,7 @@ export default async function review(ctx, body) {
     await Promise.all(pictures);
     renderAll();
     if (pictureFails.length) toast(`Saved, but ${pictureFails.length} picture${pictureFails.length === 1 ? '' : 's'} could not be stored: ${pictureFails[0]}`, 'bad');
+    if (flagFails.length) toast(`Saved, but the "AI-solved, please check" marker could not be added to ${flagFails.join(', ')}.`, 'bad');
     const failed = sess.items.filter((i) => i.saveError).length;
     toast(`${saved} saved${failed ? `, ${failed} need attention` : ''}.`, failed ? '' : 'ok');
     if (sess.items.every((i) => i.saved)) { clearDrafts(); toast('All saved.', 'ok'); navigate(`/admin/questions?status=${restore ? '' : saveStatus}`); }
@@ -171,8 +223,11 @@ export default async function review(ctx, body) {
         if (!sess.items.length) { clearDrafts(); navigate('/admin/add'); } else renderAll();
         break;
       }
+      case 'solve': await solveOne(it); break;
+      case 'solve-all': await solveAll(); break;
       case 'apply': {
         const h = handles.get(it.key);
+        if (h.aiSolved()) it.meta = { ...(it.meta ?? {}), ...h.meta() };
         const pic = h.image().value;
         if (pic) figureStore.set(it.key, pic); else figureStore.delete(it.key);
         const v = validateQuestionInput(h.read(), { taxonomy: tax.index.tree, examIds });

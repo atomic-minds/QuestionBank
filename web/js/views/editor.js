@@ -2,11 +2,13 @@
 // write questions by hand, and edit saved ones. It edits a QuestionInput (see core/validate.js)
 // and never talks to the server itself.
 import { html, rich, confirmDialog, toast } from '../dom.js';
-import { isStructureText, richPlain } from '../core/chem.js';
+import { hasMath, isStructureText, richPlain } from '../core/chem.js';
 import { figureFromBlob, figureUrl } from './image-tools.js';
 import { OPTION_LETTERS, QUESTION_TYPES, DIFFICULTIES, STATUSES, LIMITS } from '../core/constants.js';
 import { defaultOptionsFor } from '../core/validate.js';
 import { normalizeTags } from '../core/text.js';
+import * as api from '../api.js';
+import { applySolution, hasAnswer, solvable, solvedMeta, toSolveItem } from './solve.js';
 
 const kindOf = (d) => {
   const k = QUESTION_TYPES[d.type_code]?.kind ?? 'text';
@@ -44,9 +46,9 @@ const sourceNote = (kind, meta) => {
   return text ? html`<div class="notice ${cls}">${text}</div>` : '';
 };
 
-const needsPreview = (t) => Boolean(t) && (richPlain(t) !== String(t) || isStructureText(t));
+const needsPreview = (t) => Boolean(t) && (richPlain(t) !== String(t) || isStructureText(t) || hasMath(t));
 
-export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, locked = {}, image = null, photo = null }) {
+export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, locked = {}, image = null, photo = null, solve = false }) {
   const kind = kindOf(d);
   const def = QUESTION_TYPES[d.type_code];
   const subject = tax.tree.find((s) => s.id === d.subject_id);
@@ -76,6 +78,9 @@ export function renderEditor(d, { tax, errors = [], warnings = [], meta = null, 
       <textarea id="f-text" data-f="question_text" aria-invalid="${bad(errors, 'question_text')}" maxlength="${LIMITS.questionText}">${d.question_text ?? ''}</textarea>${msgs(errors, 'question_text')}${warns(warnings, 'question_text')}
       <div class="rich-prev" data-prev="question_text" ${needsPreview(d.question_text) ? '' : 'hidden'}><span class="muted small">How it will look</span><div class="${isStructureText(d.question_text) ? 'struct' : ''}">${rich(d.question_text ?? '')}</div></div>
       <p class="hint">Formulas format themselves (H2SO4 shows as H₂SO₄). You can also type H_2O, Fe^{3+}, x^2 and -> for an arrow. To draw a structure, keep each line of it on its own line, lined up with spaces.</p></div>
+
+    ${solve ? html`<div class="solve-bar"><button type="button" class="btn-sm" data-act="solve">Solve with AI</button>
+      <span class="hint">Writes the answer and a step-by-step solution for you to check. Uses 1 of today's AI uses. Anything already in the answer or explanation is replaced.</span></div>` : ''}
 
     <fieldset class="pic" data-pic><legend>Picture <span class="muted small">(optional: a structure, apparatus or graph)</span></legend>
       ${image ? html`<figure class="q-fig"><img alt="The picture saved with this question" src="${figureUrl(image)}"></figure>
@@ -146,7 +151,7 @@ function hasWork(d) {
 }
 
 export function mountEditor(container, cfg) {
-  const state = { draft: structuredClone(cfg.draft), errors: cfg.errors ?? [], warnings: cfg.warnings ?? [] };
+  const state = { draft: structuredClone(cfg.draft), errors: cfg.errors ?? [], warnings: cfg.warnings ?? [], meta: cfg.meta ?? null, solved: false };
   const pic = { value: cfg.image ?? null, changed: false };
   const d = state.draft;
   if (d.exams === undefined) d.exams = [];
@@ -154,7 +159,7 @@ export function mountEditor(container, cfg) {
 
   const draw = () => {
     const scroll = window.scrollY;
-    container.innerHTML = renderEditor(state.draft, { tax: cfg.tax, errors: state.errors, warnings: state.warnings, meta: cfg.meta, locked: cfg.locked ?? {}, image: pic.value, photo: cfg.photo ?? null }).toString();
+    container.innerHTML = renderEditor(state.draft, { tax: cfg.tax, errors: state.errors, warnings: state.warnings, meta: state.meta, locked: cfg.locked ?? {}, image: pic.value, photo: cfg.photo ?? null, solve: cfg.solve !== false }).toString();
     window.scrollTo({ top: scroll });
     lastType = state.draft.type_code;
   };
@@ -247,6 +252,24 @@ export function mountEditor(container, cfg) {
         dr.exams.splice(i, 1); break;
       }
       case 'add-context': dr.context = ''; break;
+      case 'solve': {
+        const cur = handle.read();
+        const why = solvable(cur);
+        if (why) { toast(why, 'bad'); return; }
+        const keep = state.meta?.answer_source === 'extracted' || (!state.meta && hasAnswer(cur));
+        if ((hasAnswer(cur) || String(cur.explanation ?? '').trim()) && !state.solved && !(await sure('Replace the answer and explanation?', keep ? 'The answer here was printed in your source. The AI will replace it, and its explanation, with its own.' : 'What is in the answer and explanation now will be replaced by the AI\'s.', 'Solve with AI'))) return;
+        b.disabled = true; b.textContent = 'Solving… (can take up to a minute)';
+        try {
+          const r = await api.solveQuestions([toSolveItem(cur, 'one')]);
+          const sol = r.solutions[0];
+          if (!sol?.ok) { toast(sol?.errors?.[0]?.message ?? 'The AI could not solve this question.', 'bad'); b.disabled = false; b.textContent = 'Solve with AI'; return; }
+          state.draft = applySolution(state.draft, sol);
+          state.meta = solvedMeta(state.meta, sol);
+          state.solved = true; state.errors = state.errors.filter((e) => !/^(answer|explanation)/.test(e.path));
+          toast(sol.confident ? 'Solved. Please read the answer and the steps.' : 'Solved, but the AI is not sure. Check it carefully.', sol.confident ? 'ok' : '');
+        } catch (err) { toast(err.message, 'bad'); b.disabled = false; b.textContent = 'Solve with AI'; return; }
+        break;
+      }
       case 'drop-options':
         if (hasWork(dr) && !(await sure('Remove all answer options?', 'The options and the marked correct answer will be removed, and you will type a written answer instead.', 'Remove options'))) return;
         dr.options = null; dr.answer = { text: '' }; break;
@@ -277,7 +300,10 @@ export function mountEditor(container, cfg) {
   });
 
   draw();
-  return {
+  const handle = {
+    /** True once "Solve with AI" has written into this editor (so the saved question gets the "please check" marker). */
+    aiSolved() { return state.solved; },
+    meta() { return state.meta; },
     /** The draft as a clean QuestionInput (what the server validates). */
     read() {
       const dr = structuredClone(state.draft);
@@ -297,6 +323,7 @@ export function mountEditor(container, cfg) {
     /** The picture as it is now, and whether it differs from what was loaded. */
     image() { return { value: pic.value, changed: pic.changed }; },
   };
+  return handle;
 }
 
 export { STATUSES };

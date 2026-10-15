@@ -7,6 +7,10 @@
 //   formulas          H2SO4  Ca(OH)2  CuSO4·5H2O  CH3COOH   digits after an element become subscripts
 //   ions              Fe3+  Al3+  SO42-  NH4+  Cl-  OH-     the charge becomes a superscript
 //
+//   maths             $\frac{a}{b}$  (inline)   $$ x = \frac{-b \pm \sqrt{b^2-4ac}}{2a} $$  (own line)   $\ce{2H2 + O2 -> 2H2O}$
+//                     LaTeX between dollar signs is drawn by KaTeX in the browser; here it only becomes a 'math' segment.
+//                     A plain dollar sign is written \$ . Text like "costs $5 and $10" is left alone.
+//
 // Words that are not valid formulas (Q1, Paper2, JEE2019, Class12, B12, C2 as a carbon locant) are
 // left exactly as typed. Text that already uses Unicode ₂ or ³⁺ is untouched.
 
@@ -141,11 +145,70 @@ function autoFormat(text) {
 const EXPLICIT = /\^\{([^{}]{1,24})\}|_\{([^{}]{1,24})\}|\^((?:[+\-−]\d{1,3})|(?:\d{1,3}[+\-−](?![A-Za-z0-9]))|(?:\d{1,3})|(?:[+\-−](?![A-Za-z0-9])))|<=>|<->|-->|->/g;
 const ARROWS = { '<=>': '⇌', '<->': '↔', '-->': '⟶', '->': '→' };
 
+const BAD_NU = /\n(?=(?:eq|u|e|i|abla|ot|otin|eg|less|geq|leq|ewline)(?![A-Za-z]))/g;
+
+/**
+ * Find $...$ and $$...$$ stretches. Returns pieces in order:
+ *   {math:false, s}  or  {math:true, display, tex, inner}   (tex = trimmed, inner = exactly as typed)
+ * Same rules as Pandoc, so prices survive: the opening $ must touch a non-space character, the closing $ must
+ * be touched by a non-space and not be followed by a digit.
+ */
+export function splitMath(text) {
+  const out = [];
+  let last = 0;
+  let i = 0;
+  const flush = (to) => { if (to > last) out.push({ math: false, s: text.slice(last, to) }); };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\\' && text[i + 1] === '$') { i += 2; continue; }       // \$ is a literal dollar
+    if (c !== '$') { i += 1; continue; }
+    if (text[i + 1] === '$') {                                       // $$ display $$
+      const end = text.indexOf('$$', i + 2);
+      const inner = end > i + 2 ? text.slice(i + 2, end) : '';
+      if (inner.trim() && inner.length <= 2000 && !/(?<!\\)\$/.test(inner)) {
+        flush(i); out.push({ math: true, display: true, tex: inner.trim(), inner }); i = end + 2; last = i; continue;
+      }
+      i += 2; continue;
+    }
+    const next = text[i + 1];
+    if (next !== undefined && !/\s/.test(next)) {                    // $ inline $
+      let j = i + 1;
+      while (j < text.length && j - i <= 501) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '$') break;
+        j += 1;
+      }
+      if (j < text.length && text[j] === '$' && j - i <= 501 && !/\s/.test(text[j - 1]) && !/\d/.test(text[j + 1] ?? '') && text[j + 1] !== '$') {
+        const inner = text.slice(i + 1, j);
+        flush(i); out.push({ math: true, display: false, tex: inner.trim(), inner }); i = j + 1; last = i; continue;
+      }
+    }
+    i += 1;
+  }
+  flush(text.length);
+  return out;
+}
+
+/** True when the text holds at least one $...$ formula. */
+export const hasMath = (text) => String(text ?? '').includes('$') && splitMath(String(text)).some((p) => p.math);
+
+/**
+ * A model that writes JSON can lose the backslash of \beta, \frac, \times, \rho, \neq ...: JSON reads \b, \f, \t, \r, \n as
+ * control characters. Inside $...$ only, turn those back into the LaTeX command they were meant to be.
+ */
+export function repairTex(input) {
+  const text = String(input ?? '');
+  if (!text.includes('$') && !/[\u0008\u000c]/.test(text)) return text;
+  if (!/[\u0008\u000c\t\r\n]/.test(text)) return text;
+  const fix = (m) => m.replace(/\u0008/g, '\\b').replace(/\u000c/g, '\\f').replace(/\t/g, '\\t').replace(/\r/g, '\\r').replace(BAD_NU, '\\n');
+  return splitMath(text).map((p) => (p.math ? `${p.display ? '$$' : '$'}${fix(p.inner)}${p.display ? '$$' : '$'}` : p.s)).join('');
+}
+
 /**
  * Split text into segments: {k:'t'|'sub'|'sup', s}. Concatenating every `s` gives the displayed text.
  * @returns {{k:'t'|'sub'|'sup', s:string}[]}
  */
-export function parseRich(input) {
+function parseNoMath(input) {
   const text = String(input ?? '');
   const out = [];
   const push = (seg) => {
@@ -185,12 +248,36 @@ export function parseRich(input) {
   return done;
 }
 
+/**
+ * Split text into segments: {k:'t'|'sub'|'sup', s} and, for LaTeX, {k:'math', s: tex, d: true when it stands on its own line}.
+ * Concatenating every `s` gives the displayed text (math segments contribute their LaTeX source).
+ * @returns {{k:'t'|'sub'|'sup'|'math', s:string, d?:boolean}[]}
+ */
+export function parseRich(input) {
+  const text = String(input ?? '');
+  if (!text.includes('$')) return parseNoMath(text);
+  const out = [];
+  for (const p of splitMath(text)) {
+    if (p.math) { out.push({ k: 'math', s: p.tex, d: p.display }); continue; }
+    for (const seg of parseNoMath(p.s.replace(/\\\$/g, '$'))) {
+      if (seg.k === 't' && out.length && out[out.length - 1].k === 't') out[out.length - 1].s += seg.s; else out.push(seg);
+    }
+  }
+  return out;
+}
+
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ESC[c]);
 
 /** Safe HTML for the text: everything is escaped; only <sub> and <sup> are ever added. */
 export function richHtml(text) {
-  return parseRich(text).map((s) => (s.k === 'sub' ? `<sub>${esc(s.s)}</sub>` : s.k === 'sup' ? `<sup>${esc(s.s)}</sup>` : esc(s.s))).join('');
+  return parseRich(text).map((s) => {
+    if (s.k === 'sub') return `<sub>${esc(s.s)}</sub>`;
+    if (s.k === 'sup') return `<sup>${esc(s.s)}</sup>`;
+    // The LaTeX stays as readable text until KaTeX (in the browser) draws it; data-tex is escaped like everything else.
+    if (s.k === 'math') return `<span class="math${s.d ? ' math-block' : ''}" data-tex="${esc(s.s)}"${s.d ? ' data-display="1"' : ''}>${esc(s.d ? `$$${s.s}$$` : `$${s.s}$`)}</span>`;
+    return esc(s.s);
+  }).join('');
 }
 
 /** What the text will look like with the markup applied, as plain characters (for tests and previews). */
@@ -198,7 +285,8 @@ export function richPlain(text) {
   const SUB = '₀₁₂₃₄₅₆₇₈₉';
   const SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', [MINUS]: '⁻', '-': '⁻' };
   return parseRich(text).map((s) => (s.k === 'sub' ? [...s.s].map((c) => (isDigit(c) ? SUB[Number(c)] : c)).join('')
-    : s.k === 'sup' ? [...s.s].map((c) => SUP[c] ?? c).join('') : s.s)).join('');
+    : s.k === 'sup' ? [...s.s].map((c) => SUP[c] ?? c).join('')
+    : s.k === 'math' ? (s.d ? `$$${s.s}$$` : `$${s.s}$`) : s.s)).join('');
 }
 
 /** True when a question holds a drawn structure (lines laid out with spaces and bond characters). */

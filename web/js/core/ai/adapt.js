@@ -5,6 +5,9 @@ import { isPlainObject } from '../text.js';
 import { finalizeBatch, normalizeImportItem } from '../importer.js';
 import { AI_MAX_QUESTIONS, AI_QUESTION_KEYS } from './schema.js';
 import { AiError } from './provider.js';
+import { repairTex } from '../chem.js';
+import { QUESTION_TYPES } from '../constants.js';
+import { SOLVE_KEYS, SOLVE_MAX_ITEMS } from './schema.js';
 
 const ALLOWED_TOP = new Set(['questions', 'image_issues']);
 const ALLOWED_Q = new Set(AI_QUESTION_KEYS);
@@ -12,6 +15,8 @@ const SOURCES_ANSWER = new Set(['extracted', 'inferred', 'none']);
 const SOURCES_EXPLANATION = new Set(['extracted', 'generated', 'none']);
 
 const orUndef = (v) => (v === null || v === undefined ? undefined : v);
+const fixText = (v) => (typeof v === 'string' ? repairTex(v) : v);
+const fixList = (v) => (Array.isArray(v) ? v.map(fixText) : v);
 
 /**
  * @param {any} json  parsed model output
@@ -46,12 +51,12 @@ export function adaptAiOutput(json, ctx) {
 
     const raw = {
       type: q.type,
-      question: orUndef(q.question),
-      context: orUndef(q.context),
-      options: Array.isArray(q.options) && q.options.length ? q.options : undefined,
-      match: Array.isArray(q.match_left) && Array.isArray(q.match_right) && q.match_left.length ? { left: q.match_left, right: q.match_right } : undefined,
-      answer: orUndef(q.answer),
-      explanation: orUndef(q.explanation),
+      question: orUndef(fixText(q.question)),
+      context: orUndef(fixText(q.context)),
+      options: Array.isArray(q.options) && q.options.length ? fixList(q.options) : undefined,
+      match: Array.isArray(q.match_left) && Array.isArray(q.match_right) && q.match_left.length ? { left: fixList(q.match_left), right: fixList(q.match_right) } : undefined,
+      answer: orUndef(fixText(q.answer)),
+      explanation: orUndef(fixText(q.explanation)),
       subject: nameOf(q.subject_id ?? (chapter ? subject?.id : undefined), subject),
       chapter: nameOf(q.chapter_id, chapter),
       topic: nameOf(q.topic_id, topic),
@@ -82,3 +87,50 @@ export function adaptAiOutput(json, ctx) {
 
   return { ok: true, fatal: null, notes, format: 'ai', ...finalizeBatch(items) };
 }
+
+
+/**
+ * Turns the AI's solutions into checked answers. Each question is run through the SAME importer as everything else,
+ * so a letter must be one of the real options, a numerical answer must be a number, and so on.
+ * @param {any} json    parsed model output ({solutions: [...]})
+ * @param {{key:string, type:string, question:string, context?:string|null, options?:string[]|null, match_left?:string[]|null, match_right?:string[]|null}[]} asked
+ * @param {{taxonomy: any}} ctx   an (empty is fine) taxonomy index, only needed by the importer
+ */
+export function adaptSolveOutput(json, asked, ctx) {
+  if (!isPlainObject(json) || !Array.isArray(json.solutions)) {
+    throw new AiError('AI_BAD_OUTPUT', 'The AI answered in an unexpected format. Try again.');
+  }
+  const byKey = new Map();
+  for (const s of json.solutions.slice(0, SOLVE_MAX_ITEMS * 2)) if (isPlainObject(s) && typeof s.key === 'string') byKey.set(s.key, s);
+
+  const solutions = asked.map((a, i) => {
+    const s = byKey.get(a.key);
+    if (!s) return { key: a.key, ok: false, answer: null, explanation: null, confident: false, notes: null, errors: [{ path: 'answer', message: 'The AI did not answer this question.' }] };
+    const extra = Object.keys(s).filter((k) => !SOLVE_KEYS.includes(k));
+    const notes = typeof s.notes === 'string' && s.notes.trim() ? s.notes.trim().slice(0, 500) : null;
+    const base = { key: a.key, confident: s.confident === true, notes };
+    if (extra.length) return { ...base, ok: false, answer: null, explanation: null, errors: [{ path: 'answer', message: 'The AI answered with unexpected fields. Try again.' }] };
+    if (s.answer === null || s.answer === undefined || String(s.answer).trim() === '') {
+      return { ...base, ok: false, answer: null, explanation: typeof s.explanation === 'string' ? repairTex(s.explanation) : null, confident: false,
+        errors: [{ path: 'answer', message: notes ?? 'The AI could not solve this question from what is given.' }] };
+    }
+    const raw = {
+      type: a.type,
+      question: a.question,
+      context: a.context ?? undefined,
+      options: Array.isArray(a.options) && a.options.length ? a.options : undefined,
+      match: Array.isArray(a.match_left) && Array.isArray(a.match_right) && a.match_left.length ? { left: a.match_left, right: a.match_right } : undefined,
+      answer: fixText(s.answer),
+      explanation: typeof s.explanation === 'string' && s.explanation.trim() ? fixText(s.explanation) : undefined,
+    };
+    const item = normalizeImportItem(raw, i, { taxonomy: ctx.taxonomy, strict: false, origin: 'ai_image', status: 'draft' });
+    const answerErrors = item.errors.filter((e) => /^(answer|options|match)/.test(e.path));
+    if (answerErrors.length || !item.draft) {
+      return { ...base, ok: false, answer: null, explanation: raw.explanation ?? null, confident: false, errors: answerErrors.length ? answerErrors : [{ path: 'answer', message: 'The AI answer could not be used.' }] };
+    }
+    return { ...base, ok: true, answer: item.draft.answer, explanation: item.draft.explanation ?? null, errors: [] };
+  });
+  return { ok: true, solutions };
+}
+
+export const SOLVE_TYPES = new Set(Object.keys(QUESTION_TYPES));

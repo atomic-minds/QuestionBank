@@ -149,7 +149,7 @@ async function callFunction(name, { json, form } = {}) {
       body: json ? JSON.stringify(json) : form,
     });
   } catch {
-    throw new AppError('UNAVAILABLE', 'Could not reach the server function. Check your connection, and that the functions are deployed (setup guide, "Deploy the two functions").');
+    throw new AppError('UNAVAILABLE', 'Could not reach the server function. Check your connection, and that the functions are deployed (setup guide, "Deploy the functions").');
   }
   let body = null;
   try { body = await res.json(); } catch { /* not JSON */ }
@@ -174,6 +174,25 @@ export function extractFromImage(blob, { subjectId = null, note = '' } = {}) {
   if (note) form.append('note', note);
   return callFunction('extract-question', { form });
 }
+
+/** Ask the stronger AI to solve up to 5 questions in one request (one unit of the daily AI budget). */
+export function solveQuestions(items) {
+  need();
+  return callFunction('solve-questions', { json: { items } });
+}
+
+// ------------------------------------------------------------------ "AI-solved, please check" marker (admin only)
+/** @returns {Promise<Record<string,true>>} the ids (of those asked about) that still need checking */
+export async function getAiChecks(ids) {
+  const want = [...new Set(ids.filter(Boolean))];
+  const out = {};
+  for (let at = 0; at < want.length; at += 200) {
+    const got = await guard(async () => (await authed()).rpc('qb_get_ai_checks', { p_ids: want.slice(at, at + 200) }));
+    Object.assign(out, got ?? {});
+  }
+  return out;
+}
+export const setAiCheck = (id, on) => guard(async () => (await authed()).rpc('qb_set_ai_check', { p_question: id, p_on: on }));
 
 // ------------------------------------------------------------------ admin data
 export async function adminStats() { return guard(async () => (await authed()).rpc('qb_admin_stats')); }

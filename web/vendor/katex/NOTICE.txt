@@ -1,0 +1,5 @@
+KaTeX v0.16.11 (katex.min.js, katex.min.css, fonts/*.woff2) and its mhchem extension (mhchem.min.js).
+Copyright (c) 2013-2020 Khan Academy and other contributors. MIT License.
+https://katex.org  https://github.com/KaTeX/KaTeX
+Files are used unmodified, except that katex.min.css lists only the .woff2 font files.
+These files are served from this site itself (nothing is loaded from another website).

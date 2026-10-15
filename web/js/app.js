@@ -4,6 +4,7 @@ import { interceptLinks, navigate, notFound, render, route } from './router.js';
 import * as api from './api.js';
 import { bindReveal } from './views/question-view.js';
 import { watchImages } from './views/images.js';
+import { watchMath } from './views/math.js';
 import * as theme from './theme.js';
 import { browse, home, questionPage, setTitle } from './views/public.js';
 
@@ -124,6 +125,7 @@ setupMenu();
 }
 bindReveal(document.getElementById('app'));
 watchImages(document.getElementById('app'));
+watchMath(document.getElementById('app'));
 route('/', view(home));
 route('/browse', view((ctx, app) => browse({ ...ctx, params: {} }, app)));
 route('/browse/:subject', view(browse));

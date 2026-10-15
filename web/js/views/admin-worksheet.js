@@ -1,6 +1,7 @@
 // Print / PDF worksheet: choose questions, choose what to show, then print the page or "Save as PDF"
 // from the browser's print dialog. Nothing is sent anywhere; the sheet is built from your questions.
 import { html, rich, on, toast } from '../dom.js';
+import { hydrateMath } from './math.js';
 import * as api from '../api.js';
 import { QUESTION_TYPES, DIFFICULTIES } from '../core/constants.js';
 import { isStructureText } from '../core/chem.js';
@@ -155,6 +156,6 @@ export default async function worksheet(ctx, body) {
     }
   });
   on(body, 'click', '#w-back', () => { out.hidden = true; builder.hidden = false; });
-  on(body, 'click', '#w-print', () => window.print());
+  on(body, 'click', '#w-print', async () => { await hydrateMath(body); window.print(); });
   count();
 }

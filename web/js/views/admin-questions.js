@@ -7,6 +7,7 @@ import { emptyQuestionInput } from '../core/validate.js';
 import { setTitle } from './public.js';
 import { mountEditor } from './editor.js';
 import { bindFilterBar, filterBar } from './filterbar.js';
+import { applySolution, solvable, solveMany, summarize } from './solve.js';
 
 const PAGE = 50;
 const NEXT = {
@@ -56,6 +57,10 @@ export default async function list(ctx, body) {
   const hasFilter = FILTER_KEYS.some((k) => q[k]);
   const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, limit: PAGE, offset: (page - 1) * PAGE }) : null;
   if (ctx.stale()) return;
+  // Which of these were answered by AI and not yet checked (admin only; the public never sees this).
+  let flags = {};
+  if (res?.items.length) { try { flags = await api.getAiChecks(res.items.map((i) => i.id)); } catch { flags = {}; } }
+  if (ctx.stale()) return;
   const link = (p) => withQuery('/admin/questions', { ...q, ...p });
   const thisYear = new Date().getFullYear();
   const fields = [
@@ -80,10 +85,10 @@ export default async function list(ctx, body) {
         return html`<tr data-pid="${it.public_id}"><td><input type="checkbox" data-sel aria-label="Select ${it.public_id}"></td>
           <td class="nowrap"><a href="/admin/edit/${it.public_id}">${it.public_id}</a></td><td class="q-cell">${short(it.question_text)}</td>
           <td class="nowrap" data-label="Type">${QUESTION_TYPES[it.type_code]?.label}</td><td data-label="Where">${s?.name ?? ''}${c ? html`<br><span class="muted small">${c.name}</span>` : ''}</td>
-          <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}</td>
-          <td class="actions"><div class="act">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button>`)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a><button type="button" class="btn-sm btn-danger" data-del>Delete</button></div></td></tr>`;
+          <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}${flags[it.id] ? html` <span class="badge ai" title="The AI wrote this answer. Read it, then press Mark as checked.">AI-solved: check</span>` : ''}</td>
+          <td class="actions"><div class="act">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button>`)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a>${flags[it.id] ? html`<button type="button" class="btn-sm" data-checked>Mark as checked</button>` : ''}<button type="button" class="btn-sm btn-danger" data-del>Delete</button></div></td></tr>`;
       })}</tbody></table></div>
-      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button><button type="button" class="btn-danger" id="bdel" aria-label="Delete selected questions">Delete…</button></div>
+      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button><button type="button" id="bsolve">Solve with AI…</button><button type="button" id="bcheck">Mark as checked</button><button type="button" class="btn-danger" id="bdel" aria-label="Delete selected questions">Delete…</button></div>
       <div class="pager">${page > 1 ? html`<a class="btn" href="${link({ page: page - 1 })}">Previous</a>` : html`<span></span>`}<span class="muted small">Page ${page}</span>${res.has_more ? html`<a class="btn" href="${link({ page: page + 1 })}">Next</a>` : html`<span></span>`}</div>`
       : html`<div class="empty-state section"><p><b>No questions match.</b></p><p class="muted">Try other dropdown values, or clear the filters.</p><a class="btn btn-primary" href="/admin/add">Add questions</a></div>`}`.toString();
 
@@ -117,16 +122,47 @@ export default async function list(ctx, body) {
       navigate(location.pathname + location.search, { replace: true });
     } catch (e) { toast(e.message, 'bad'); }
   };
+  const markChecked = async (list) => {
+    try {
+      await Promise.all(list.map((x) => api.setAiCheck(x.id, false)));
+      toast(`Marked ${list.length} as checked.`, 'ok');
+      navigate(location.pathname + location.search, { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  const solveSaved = async (list) => {
+    const ready = list.filter((x) => !solvable(api.toInput(x)));
+    if (!ready.length) { toast('None of the selected questions can be sent to the AI (they need text and options).', 'bad'); return; }
+    const live = ready.filter((x) => x.status === 'published').length;
+    if (!(await confirmDialog({ title: `Solve ${ready.length} question${ready.length === 1 ? '' : 's'} with AI?`,
+      body: html`<p>The AI will write a new answer and a step-by-step solution for each, <b>replacing the ones saved now</b>. Each keeps its status, and is marked <b>AI-solved: check</b> until you mark it checked.</p>
+        ${live ? html`<p class="warn-line"><b>${live} of these ${live === 1 ? 'is' : 'are'} published.</b> The new answer goes live straight away. Move them to draft first if you want to check before anyone sees it.</p>` : ''}
+        <p class="small">This uses ${Math.ceil(ready.length / 5)} of today's AI uses and can take a few minutes.</p>`, confirmLabel: 'Solve and save' }))) return;
+    const btn = body.querySelector('#bsolve'); btn.disabled = true;
+    const r = await solveMany(ready.map((x) => ({ key: x.id, draft: api.toInput(x) })), { onProgress: (n, total) => { btn.textContent = `Solving… ${n}/${total}`; } });
+    const items = ready.filter((x) => r.solved.has(x.id)).map((x) => applySolution(api.toInput(x), r.solved.get(x.id)));
+    let saved = 0; const notSaved = [];
+    if (items.length) {
+      try {
+        const out = await api.saveQuestions('save', items, { confirmNear: true });
+        const okIds = [];
+        out.results.forEach((res, k) => { if (res.ok) { saved += 1; okIds.push(res.id); } else notSaved.push(res.message ?? res.errors?.[0]?.message ?? `${ready.filter((x) => r.solved.has(x.id))[k].public_id} could not be saved`); });
+        await Promise.all(okIds.map((id) => api.setAiCheck(id, true).catch(() => null)));
+      } catch (e) { toast(e.message, 'bad'); }
+    }
+    toast(`${saved} saved with AI answers. ${r.failed.size ? `${r.failed.size} could not be solved. ` : ''}${notSaved.length ? `${notSaved.length} could not be saved: ${notSaved[0]}. ` : ''}${r.stopped ? r.stopped.message : ''}`.trim(), (r.failed.size || notSaved.length || r.stopped) ? 'bad' : 'ok');
+    navigate(location.pathname + location.search, { replace: true });
+  };
   body.addEventListener('click', (e) => {
     const t = e.target instanceof Element ? e.target : null;
     if (!t) return;
+    if (t.closest('[data-checked]')) markChecked([byPid(t.closest('tr').dataset.pid)]);
     const b = t.closest('[data-to]');
     if (b) run([byPid(b.closest('tr').dataset.pid)], b.dataset.to);
     if (t.closest('[data-del]')) remove([byPid(t.closest('tr').dataset.pid)]);
-    if (t.id === 'bapply' || t.id === 'bdel') {
+    if (t.id === 'bapply' || t.id === 'bdel' || t.id === 'bsolve' || t.id === 'bcheck') {
       const sel = [...body.querySelectorAll('[data-sel]:checked')].map((c) => byPid(c.closest('tr').dataset.pid));
       if (!sel.length) { toast('Select at least one question.'); return; }
-      if (t.id === 'bdel') remove(sel); else run(sel, body.querySelector('#bs').value);
+      if (t.id === 'bdel') remove(sel); else if (t.id === 'bsolve') solveSaved(sel); else if (t.id === 'bcheck') markChecked(sel.filter((x) => flags[x.id])); else run(sel, body.querySelector('#bs').value);
     }
   });
 }
@@ -153,7 +189,16 @@ export async function editPage(ctx, body) {
       ${q ? html`<button class="btn-danger" id="del">Delete permanently</button>` : ''}
       ${q ? html`<p class="hint small">Created ${new Date(q.created_at).toLocaleString()}<br>Last changed ${new Date(q.updated_at).toLocaleString()}${q.origin === 'ai_image' ? html`<br>Read from an image by AI` : ''}</p>` : ''}</aside></div>`.toString();
   const existing = q ? ((await api.getImages([q.id], { fresh: true }))[q.id] ?? null) : null;
+  let flagged = false;
+  if (q) { try { flagged = Boolean((await api.getAiChecks([q.id]))[q.id]); } catch { flagged = false; } }
   if (ctx.stale()) return;
+  if (flagged) {
+    body.querySelector('#msg').innerHTML = html`<div class="notice warn"><b>AI-solved: please check.</b> The AI wrote this answer. Read it and the steps, fix anything wrong, then press Mark as checked. Only admins see this.
+      <p><button type="button" class="btn-sm" id="checked">Mark as checked</button></p></div>`.toString();
+    body.querySelector('#checked').addEventListener('click', async () => {
+      try { await api.setAiCheck(q.id, false); toast('Marked as checked.', 'ok'); navigate(location.pathname, { replace: true }); } catch (e) { toast(e.message, 'bad'); }
+    });
+  }
   const ed = mountEditor(body.querySelector('#ed'), { draft, tax, locked: {}, image: existing });
   const msg = body.querySelector('#msg');
   const saveBtn = body.querySelector('#save');
@@ -165,10 +210,11 @@ export async function editPage(ctx, body) {
       if (!(await confirmDialog({ title: `${archive ? 'Archive' : 'Unpublish'} ${q.public_id}?`, body: 'It will disappear from the public site until you publish it again.', confirmLabel: archive ? 'Archive' : 'Unpublish', danger: true }))) return;
     }
     if (isNew) { delete value.id; delete value.expected_version; }
-    saveBtn.disabled = true; msg.innerHTML = '';
+    saveBtn.disabled = true; if (!flagged) msg.innerHTML = '';
     try {
       const r = (await api.saveQuestions('save', [value], { confirmNear })).results[0];
       if (r.ok) {
+        if (ed.aiSolved()) { try { await api.setAiCheck(r.id, true); } catch { toast('Saved, but the "AI-solved" marker could not be added.', 'bad'); } }
         const pic = ed.image();
         let picNote = '';
         if (pic.changed) {
