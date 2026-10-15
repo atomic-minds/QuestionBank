@@ -16,6 +16,17 @@ const SOURCES_EXPLANATION = new Set(['extracted', 'generated', 'none']);
 
 const orUndef = (v) => (v === null || v === undefined ? undefined : v);
 const fixText = (v) => (typeof v === 'string' ? repairTex(v) : v);
+/** A short or long answer IS its own explanation, so an explanation the AI adds there is only noise (a topic name, a repeat). */
+const NO_EXPLANATION_TYPES = new Set(['short_answer', 'long_answer']);
+
+/**
+ * The number printed beside a question on paper ("19.", "Q.5", "3)", "Question 2:") is not part of the question,
+ * and the app numbers questions itself. Part labels such as "(a)" or "(i)" are kept.
+ */
+const DIGIT = '[0-9\\u09E6-\\u09EF\\u0966-\\u096F]';
+const LEAD_NO = new RegExp(`^\\s*(?:(?:Q(?:uestion|ns?)?|Ques)\\.?\\s*${DIGIT}{1,3}\\s*[.):\\-]?|${DIGIT}{1,3}\\s*[.):])[ \\t]+(?=\\S)`, 'i');
+export const stripQuestionNumber = (t) => (typeof t === 'string' ? t.replace(LEAD_NO, '') : t);
+
 const fixList = (v) => (Array.isArray(v) ? v.map(fixText) : v);
 
 /**
@@ -51,12 +62,12 @@ export function adaptAiOutput(json, ctx) {
 
     const raw = {
       type: q.type,
-      question: orUndef(fixText(q.question)),
+      question: orUndef(stripQuestionNumber(fixText(q.question))),
       context: orUndef(fixText(q.context)),
       options: Array.isArray(q.options) && q.options.length ? fixList(q.options) : undefined,
       match: Array.isArray(q.match_left) && Array.isArray(q.match_right) && q.match_left.length ? { left: fixList(q.match_left), right: fixList(q.match_right) } : undefined,
       answer: orUndef(fixText(q.answer)),
-      explanation: orUndef(fixText(q.explanation)),
+      explanation: NO_EXPLANATION_TYPES.has(q.type) && q.explanation_source !== 'extracted' ? undefined : orUndef(fixText(q.explanation)),
       subject: nameOf(q.subject_id ?? (chapter ? subject?.id : undefined), subject),
       chapter: nameOf(q.chapter_id, chapter),
       topic: nameOf(q.topic_id, topic),
@@ -78,7 +89,7 @@ export function adaptAiOutput(json, ctx) {
     const eSrc = SOURCES_EXPLANATION.has(q.explanation_source) ? q.explanation_source : 'none';
     item.meta = {
       answer_source: q.answer === null || q.answer === undefined ? 'none' : aSrc,
-      explanation_source: q.explanation === null || q.explanation === undefined ? 'none' : eSrc,
+      explanation_source: item.draft?.explanation ? eSrc : 'none',
       has_figure: q.has_figure === true,
       notes: typeof q.notes === 'string' && q.notes.trim() ? q.notes.trim().slice(0, 500) : null,
     };
@@ -121,7 +132,7 @@ export function adaptSolveOutput(json, asked, ctx) {
       options: Array.isArray(a.options) && a.options.length ? a.options : undefined,
       match: Array.isArray(a.match_left) && Array.isArray(a.match_right) && a.match_left.length ? { left: a.match_left, right: a.match_right } : undefined,
       answer: fixText(s.answer),
-      explanation: typeof s.explanation === 'string' && s.explanation.trim() ? fixText(s.explanation) : undefined,
+      explanation: typeof s.explanation === 'string' && s.explanation.trim() && !NO_EXPLANATION_TYPES.has(a.type) ? fixText(s.explanation) : undefined,
     };
     const item = normalizeImportItem(raw, i, { taxonomy: ctx.taxonomy, strict: false, origin: 'ai_image', status: 'draft' });
     const answerErrors = item.errors.filter((e) => /^(answer|options|match)/.test(e.path));

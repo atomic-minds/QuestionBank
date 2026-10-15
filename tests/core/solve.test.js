@@ -174,3 +174,42 @@ test('repairTex leaves ordinary text alone', () => {
   assert.equal(repairTex('$x$\nnext line'), '$x$\nnext line');
   assert.equal(repairTex('$a \\neq b$'), '$a \\neq b$');
 });
+
+// ------------------------------------------------------------------ short / long answers carry no separate explanation
+test('short and long answers: an AI-added explanation is dropped, numerical ones keep theirs', async () => {
+  const be = backend({ solutions: [
+    { key: 'k3', answer: '- Equal volumes\n- Same T and P', explanation: 'Gas laws and Avogadro.', confident: true, notes: null },
+    { key: 'k2', answer: '18', explanation: 'Given: H = 1\nAnswer: 18', confident: true, notes: null },
+  ] });
+  const r = await call(req([SHORT, NUM]), be);
+  assert.equal(r.body.solutions[0].ok, true);
+  assert.equal(r.body.solutions[0].explanation, null);
+  assert.match(r.body.solutions[1].explanation, /^Given:/);
+});
+
+test('the photo reader: a short answer keeps no generated explanation, but a printed one stays', async () => {
+  const { adaptAiOutput } = await import('../../supabase/functions/_shared/core/ai/adapt.js');
+  const tax = buildTaxonomyIndex([{ id: 1, code: 'CHEM', name: 'Chemistry', slug: 'chemistry', chapters: [{ id: 10, name: 'Atoms', slug: 'atoms', topics: [] }] }], []);
+  const q = (over) => ({ type: 'short_answer', question: 'State the law.', context: null, options: null, match_left: null, match_right: null, answer: '- point one\n- point two', answer_source: 'inferred', explanation: 'Gas laws.', explanation_source: 'generated', subject_id: 1, chapter_id: 10, topic_id: null, difficulty: 'easy', marks: 2, tags: [], exams: [], notes: null, ...over });
+  const out = adaptAiOutput({ image_issues: null, questions: [q({}), q({ question: 'State another law.', explanation: 'Printed in the book.', explanation_source: 'extracted' })] }, { taxonomy: tax });
+  assert.equal(out.items[0].draft.explanation ?? null, null);
+  assert.equal(out.items[0].meta.explanation_source, 'none');
+  assert.equal(out.items[1].draft.explanation, 'Printed in the book.');
+  assert.equal(out.items[1].meta.explanation_source, 'extracted');
+});
+
+// ------------------------------------------------------------------ printed question numbers
+test('the number printed on the paper is removed from the question; part labels stay', async () => {
+  const { stripQuestionNumber, adaptAiOutput } = await import('../../supabase/functions/_shared/core/ai/adapt.js');
+  assert.equal(stripQuestionNumber('19. (a) Write IUPAC names of:\n(i) X\n(ii) Y'), '(a) Write IUPAC names of:\n(i) X\n(ii) Y');
+  assert.equal(stripQuestionNumber('Q.5 Calculate the pH'), 'Calculate the pH');
+  assert.equal(stripQuestionNumber('Question 2: State the law'), 'State the law');
+  assert.equal(stripQuestionNumber('3) Define mole'), 'Define mole');
+  assert.equal(stripQuestionNumber('১৯. নাম লেখো'), 'নাম লেখো');
+  for (const keep of ['(a) Write the names', '2.5 g of NaCl is dissolved', '12 g of carbon burns', '5 moles of gas react', '(i) first part']) assert.equal(stripQuestionNumber(keep), keep, keep);
+  const tax = buildTaxonomyIndex([{ id: 1, code: 'CHEM', name: 'Chemistry', slug: 'chemistry', chapters: [{ id: 10, name: 'Atoms', slug: 'atoms', topics: [] }] }], []);
+  const out = adaptAiOutput({ image_issues: null, questions: [{ type: 'short_answer', question: '19. (a) Name it.\n(b) Why?', context: null, options: null, match_left: null, match_right: null, answer: '- x', answer_source: 'inferred', explanation: null, explanation_source: 'none', subject_id: 1, chapter_id: 10, topic_id: null, difficulty: 'easy', marks: 2, tags: [], exams: [], notes: null }] }, { taxonomy: tax });
+  assert.equal(out.items[0].draft.question_text, '(a) Name it.\n(b) Why?');
+  const { system } = buildPrompt(buildTaxonomyIndex([], []), {});
+  assert.match(system, /NUMBERING: never copy the question number/);
+});

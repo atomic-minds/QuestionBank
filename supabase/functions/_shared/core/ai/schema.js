@@ -17,7 +17,7 @@ export const AI_QUESTION_PROPERTIES = {
   match_right: strList('List II items for match_following, in printed order, without labels.'),
   answer: str('ALWAYS give it. Choice types: the option letter (A, B, ...). Numerical: the final number then the unit only. Match: pairs like "A-2, B-1". Short/long/fill-blank: the model answer (one point per line starting with "- " for short/long). null only if it truly cannot be answered from the image.', true),
   answer_source: { type: 'STRING', enum: ['extracted', 'inferred', 'none'], description: 'extracted = the answer is printed in the image; inferred = you solved it yourself; none = impossible to answer (missing data/figure).' },
-  explanation: str('ALWAYS give it. Numerical: the worked solution with the lines Given / To find / Concept / formula / Steps / Answer. Other types: a short reason or the key concept. Use LaTeX between $ signs for real maths.', true),
+  explanation: str('Give it for every type except short and long answers. Numerical: the worked solution with the lines Given / To find / Concept / formula / Steps / Answer. Short and long answers: null (the answer already is the full explanation). Other types: a short reason. Use LaTeX between $ signs for real maths.', true),
   explanation_source: { type: 'STRING', enum: ['extracted', 'generated', 'none'], description: 'extracted = printed in the image; generated = you wrote it; none = no explanation.' },
   subject_id: { type: 'INTEGER', nullable: true, description: 'Subject id from the provided list, or null.' },
   chapter_id: { type: 'INTEGER', nullable: true, description: 'Chapter id from the provided list, or null.' },
@@ -71,7 +71,7 @@ export const SOLVE_MAX_ITEMS = 5;
 export const SOLVE_PROPERTIES = {
   key: str('The key of the question being solved, copied exactly.'),
   answer: str('The answer in the format for the question type (option letter, number then unit, "A-2, B-1", or the model answer text). null only if it cannot be solved.', true),
-  explanation: str('The worked solution / reason, as described in the rules. null only if the answer is null.', true),
+  explanation: str('The worked solution / reason, as described in the rules. null for short and long answers (the answer is the explanation), and null if the answer is null.', true),
   confident: { type: 'BOOLEAN', description: 'true only if you are sure of the final answer after checking.' },
   notes: str('Anything the teacher should check, or why it could not be solved. null if nothing.', true),
 };

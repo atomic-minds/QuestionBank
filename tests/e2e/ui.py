@@ -832,6 +832,7 @@ def main():
             check('edit page shows the check notice and a Mark as checked button', 'AI-solved: please check' in text() and page.locator('#checked').count() == 1)
             page.click('#checked')
             until(lambda: ctl(sql='select count(*) from public.question_ai_check')['out'].strip().endswith('0'), 10, 'cleared')
+            until(lambda: 'AI-solved: please check' not in text(), 10, 'notice gone')
             check('Mark as checked clears the marker', 'AI-solved: please check' not in text())
 
             # a numerical question solved in the editor: step-by-step, maths and chemistry drawn properly
@@ -874,6 +875,10 @@ def main():
             until(lambda: ctl(sql=f"select answer->>'text' from public.questions where public_id = '{spid}'")['out'].strip().endswith('- contain equal numbers of molecules ($V \\propto n$)'), 25, 'bulk solved')
             until(lambda: ctl(sql='select count(*) from public.question_ai_check')['out'].strip().endswith('1'), 10, 'marker set')
             check('bulk solve saved the AI answer and marked it for checking', True)
+            ctl(sql=f"update public.questions set question_text = 'Name the ion $\\ce{{[Co(NH3)5SO4]^+}}$ in words.' where public_id = '{spid}'")
+            go('/admin/questions?status=draft')
+            until(lambda: page.locator(f'tr[data-pid="{spid}"] .q-cell .katex').count() >= 1, 15, 'maths in list')
+            check('admin list draws formulas instead of showing $\\ce{...} source', '\\ce' not in page.inner_text(f'tr[data-pid="{spid}"] .q-cell'), page.inner_text(f'tr[data-pid="{spid}"] .q-cell'))
             used0 = ctl(sql='select coalesce(sum(used),0) from public.ai_usage')['out'].strip().split()[-1]
             ctl(gemini='quota'); go(f'/admin/edit/{spid}'); page.click('[data-act=solve]')
             page.wait_for_selector('dialog[open]'); page.click('dialog button[value=ok]')

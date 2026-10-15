@@ -19,7 +19,7 @@ const TYPE_HELP = {
 
 
 // Shared by the photo reader and the "Solve with AI" button.
-export const MATH_RULE = 'When something needs real layout (fractions, roots, integrals, sums, matrices, long equations, reaction conditions) write LaTeX between dollar signs: $...$ inside a sentence, $$...$$ on its own line. Chemical equations: $\\ce{2H2 + O2 -> 2H2O}$ and $\\ce{SO4^2-}$. Because the answer is JSON, EVERY backslash must be doubled (write \\\\frac, \\\\times, \\\\ce). Never use a dollar sign for money or anything else; a literal dollar is written \\$.';
+export const MATH_RULE = 'When something needs real layout (fractions, roots, integrals, sums, matrices, long equations, reaction conditions) write LaTeX between dollar signs: $...$ inside a sentence, $$...$$ on its own line (use it for every long equation or calculation, and any fraction with long terms, so it can scroll on a phone). Never put words in Bengali, Hindi or any other language inside the dollar signs; only the formula goes there. Chemical equations: $\\ce{2H2 + O2 -> 2H2O}$ and $\\ce{SO4^2-}$. Because the answer is JSON, EVERY backslash must be doubled (write \\\\frac, \\\\times, \\\\ce). Never use a dollar sign for money or anything else; a literal dollar is written \\$.';
 
 export const SOLUTION_RULES = [
   'Write in the SAME language as the question, with the same level as a good teacher\'s model answer. Check every calculation before you write it.',
@@ -29,7 +29,7 @@ export const SOLUTION_RULES = [
   'Concept / formula: the law or formula used, written properly',
   'Steps: numbered lines, each showing the substitution and the result with units (keep significant figures sensible)',
   'Answer: the result, with its unit',
-  'SHORT and LONG answers: answer = the complete model answer as separate points, one per line, starting with "- "; about one point per mark when marks are known, otherwise 3 to 5 points for short and 6 to 10 for long. explanation = the key concept, formula or reasoning behind it, or null if the points already say it.',
+  'SHORT and LONG answers: answer = the complete model answer as separate points, one per line, starting with "- "; about one point per mark when marks are known, otherwise 3 to 5 points for short and 6 to 10 for long. The answer IS the explanation, so explanation must be null: never add a summary, a topic name or a repeat of the points.',
   'Choice, true/false, assertion-reason, fill-in-the-blank and match questions: answer in the usual form; explanation = a short reason (2 to 4 lines) for why that answer is right, and for MCQ say briefly why the main wrong option is wrong.',
   'Never invent data that the question does not give. If it cannot be solved, say so in notes.',
 ].join('\n');
@@ -74,7 +74,7 @@ export function buildPrompt(index, opts = {}) {
     '4. Remove option labels such as "A.", "(b)" or "3)" from option text; the order is what matters.',
     '5. type must be one of the codes below. Choose the closest one.',
     '6. ALWAYS give an answer. answer_source: "extracted" ONLY if the correct answer is printed in the image (answer key, tick, solution). If it is not printed, SOLVE the question yourself, check it, and use "inferred". Use "none" (answer null) only when it truly cannot be answered from what is shown (for example the needed figure or data is missing) and say why in notes. Never present your own answer as extracted.',
-    '7. ALWAYS give an explanation (explanation_source "generated", or "extracted" when a solution is printed). ' + SOLUTION_RULES,
+    '7. Give an explanation for every question EXCEPT short and long answers (explanation_source "generated", or "extracted" when a solution is printed). ' + SOLUTION_RULES,
     '8. Choose subject_id / chapter_id / topic_id ONLY from the lists below. Use null when nothing fits. Never invent an id.',
     '9. exams: only if the image itself states the exam and year (for example "JEE Main 2019 Shift 2"). Use ids from the exam list. Otherwise return an empty list.',
     '10. marks: only if printed next to the question, otherwise null. difficulty: your honest estimate, or "unknown".',
@@ -84,6 +84,7 @@ export function buildPrompt(index, opts = {}) {
     '14. STRUCTURES: if a structural formula is drawn with simple lines (for example CH₃–CH(CH₃)–OCH₃ with a vertical bond), reproduce it as text lines inside question, keeping the layout with spaces and | / \\ characters, and put the sentence on its own line. Do not describe it in words instead.',
     '15. FIGURES: set has_figure to true when the question needs a picture that cannot be written as text (ring or skeletal structures, apparatus, graphs, circuit-like diagrams). Still transcribe all the text, and mention the figure in notes. Otherwise false.',
     '16. PARTS: a question with lettered or numbered parts, for example (a) (b) or (i) (ii) under one stem or one question number, is ONE question. Put the stem and every part, each on its own line, in question, and make the answer cover every part, labelled the same way ((a) ..., (b) ...). Split into separate questions only when the parts are clearly independent questions with their own numbers.',
+    '17. NUMBERING: never copy the question number printed on the paper ("19.", "Q.5", "3)", "Question 2:") into question; the app numbers questions itself. Start question with the real text. Keep the part labels (a), (b), (i), (ii) inside the text.',
     '',
     'QUESTION TYPES',
     types,
