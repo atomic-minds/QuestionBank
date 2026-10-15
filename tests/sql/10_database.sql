@@ -533,5 +533,30 @@ reset role;
 select test.ok(not exists (select 1 from public.question_images where question_id = :'id_pic_pub'::uuid), 'picture: deleted with its question');
 :as_admin
 
+
+-- ---- "answer written by AI, please check" marker: admin only, never public ----------------------------------------
+select (test.save('{"question_text":"A question whose answer the AI wrote?"}'))->>'id' as id_aic \gset
+:as_admin
+select test.ok((public.qb_set_ai_check(:'id_aic'::uuid, true) ->> 'on')::boolean, 'ai-check: admin can flag a question');
+select public.qb_set_ai_check(:'id_aic'::uuid, true);
+select test.ok(test.keys_count(public.qb_get_ai_checks(array[:'id_aic'::uuid])) = 1, 'ai-check: flagging twice still gives one flag');
+select test.ok(public.qb_get_ai_checks(array[:'id_aic'::uuid]) ? :'id_aic', 'ai-check: admin sees the flag');
+:as_anon
+select test.throws($$select public.qb_get_ai_checks(array['00000000-0000-0000-0000-000000000000'::uuid])$$, '42501', 'ai-check: the public cannot even ask for flags');
+select test.throws($$select public.qb_set_ai_check('00000000-0000-0000-0000-000000000000'::uuid, true)$$, '42501', 'ai-check: the public cannot flag');
+select test.throws($$select * from public.question_ai_check$$, '42501', 'ai-check: the table cannot be read directly');
+:as_user
+select test.ok(public.qb_get_ai_checks(array[:'id_aic'::uuid]) = '{}'::jsonb, 'ai-check: a signed-in non-admin sees nothing');
+select test.throws($$select public.qb_set_ai_check('00000000-0000-0000-0000-000000000000'::uuid, false)$$, '42501', 'ai-check: a non-admin cannot clear');
+:as_admin
+select test.throws($$select public.qb_set_ai_check('00000000-0000-0000-0000-000000000000'::uuid, true)$$, 'QB_NOT_FOUND', 'ai-check: unknown question is refused');
+select public.qb_set_ai_check(:'id_aic'::uuid, false);
+select test.ok(public.qb_get_ai_checks(array[:'id_aic'::uuid]) = '{}'::jsonb, 'ai-check: "Mark as checked" removes the flag');
+select public.qb_set_ai_check(:'id_aic'::uuid, true);
+delete from public.questions where id = :'id_aic'::uuid;
+reset role;
+select test.ok(not exists (select 1 from public.question_ai_check where question_id = :'id_aic'::uuid), 'ai-check: deleted with its question');
+:as_admin
+
 -- Marker proving the whole file ran to the end (the harness requires it).
 select test.ok(true, 'END OF 10_database');

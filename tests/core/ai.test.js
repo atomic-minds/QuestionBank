@@ -149,7 +149,8 @@ test('provider configuration is checked up front', () => {
   assert.throws(() => createGeminiProvider({ apiKey: 'k', model: '../etc/passwd' }), { code: 'AI_NOT_CONFIGURED' });
   const env = (m) => (n) => m[n];
   assert.equal(aiStatus(env({})).configured, false);
-  assert.deepEqual(aiStatus(env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'some-model' })), { configured: true, provider: 'gemini', model: 'some-model' });
+  assert.deepEqual(aiStatus(env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'some-model' })), { configured: true, provider: 'gemini', model: 'some-model', solve_model: 'some-model' });
+  assert.equal(aiStatus(env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'some-model', GEMINI_SOLVE_MODEL: 'big-model' })).solve_model, 'big-model');
   assert.throws(() => getProvider(env({ AI_PROVIDER: 'mystery' })), { code: 'AI_NOT_CONFIGURED' });
 });
 

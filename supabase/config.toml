@@ -9,3 +9,6 @@ verify_jwt = false
 
 [functions.save-questions]
 verify_jwt = false
+
+[functions.solve-questions]
+verify_jwt = false

@@ -95,7 +95,7 @@ Also note your **project reference**: the first part of the URL (`abcdefghijklmn
 2. On your computer open the file `supabase/migrations/0001_schema.sql` in any text editor (Notepad is fine). Select all, copy.
 3. Paste into the SQL editor and click **Run**. You should see **Success. No rows returned**.
 4. Repeat for the next files, **in this order**, each in a fresh query:
-   `0002_security.sql` → `0003_api.sql` → `0004_reference_data.sql` → `0005_starter_taxonomy.sql`.
+   `0002_security.sql` → `0003_api.sql` → `0004_reference_data.sql` → `0005_starter_taxonomy.sql` → `0006_ai_day_india.sql` → `0007_pictures.sql` → `0008_ai_check.sql`.
 
 `0005` is optional (it is a normal migration file, so if you ever use `npx supabase db push` instead of the SQL editor, it will be applied too; you can then simply delete the rows you do not want in the Taxonomy page). It adds a starter list of Chemistry chapters and exams (CBSE, JEE Main…) so you are not starting from nothing. You can change all of it later in the app. If you want no starter list, skip `0005` and add your own subjects in the Taxonomy page.
 
@@ -138,7 +138,7 @@ You can skip this whole step and still use the app: **Paste JSON** and **Write o
 
 ---
 
-## Step 4. Deploy the two server functions
+## Step 4. Deploy the server functions
 
 These run on Supabase's free servers. You do this once.
 
@@ -170,7 +170,7 @@ Finally deploy:
 npx supabase functions deploy
 ```
 
-This should list `extract-question` and `save-questions` as deployed. If it complains about Docker, see Troubleshooting.
+This should list `extract-question`, `solve-questions` and `save-questions` as deployed. (Optional: `npx supabase secrets set GEMINI_SOLVE_MODEL=<a stronger model that is free on your plan>` for the "Solve with AI" button; without it the normal model is used.) If it complains about Docker, see Troubleshooting.
 
 ---
 
@@ -256,7 +256,7 @@ If you are comfortable with the terminal you can also take a complete database c
 | `npx supabase functions deploy` asks for Docker or fails to bundle | Try `npx supabase functions deploy --use-api`. If it still fails, upgrade the tool with `npx supabase@latest functions deploy`. |
 | "Could not reach the server function" | The functions are not deployed (redo Step 4), or the project is paused (open the Supabase dashboard and click **Restore**). |
 | AI says "not configured" | `GEMINI_API_KEY` or `GEMINI_MODEL` is missing. Run the `secrets set` line again. |
-| AI says the free quota is used up | Wait until it resets (midnight Pacific time) or use **Paste JSON**. As long as billing was never enabled for the key, nothing is charged. |
+| AI says the free quota is used up | Wait until it resets (this app's own counter resets at 12:00 am India time; Google's own free limit resets at about 12:30 pm IST) or use **Paste JSON**. As long as billing was never enabled for the key, nothing is charged. |
 | AI says the model is unavailable | The model name is wrong or not free for your account. Pick another from the Gemini models page and run `secrets set GEMINI_MODEL=…` again. |
 | "New questions are paused" | The database is near the free 500 MB limit. Export a backup, archive or delete old questions, or raise `DB_SOFT_LIMIT_MB` slightly. |
 | A page shows "not found" after refreshing | Check `wrangler.jsonc` was deployed unchanged (it contains `single-page-application`). |

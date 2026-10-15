@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { handleSave } from '../../supabase/functions/_shared/handlers/save.js';
 import { handleExtract } from '../../supabase/functions/_shared/handlers/extract.js';
+import { handleSolve } from '../../supabase/functions/_shared/handlers/solve.js';
 import { route } from '../../supabase/functions/_shared/handlers/http.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -113,12 +114,30 @@ function geminiReply(mode) {
   return { status: 200, body: { candidates: [{ content: { parts: [{ text: JSON.stringify({ image_issues: 'Bottom edge slightly cropped.', questions }) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 80 } } };
 }
 
+/** A canned "Solve with AI" answer for every question in the request (text only, no image). */
+function solveReply(bodyText) {
+  const { contents } = JSON.parse(bodyText);
+  const text = contents[0].parts.map((p) => p.text ?? '').join('');
+  const asked = JSON.parse(text.slice(text.indexOf('\n\n') + 2));
+  const solutions = asked.map((a) => {
+    const base = { key: a.key, confident: true, notes: null };
+    if (a.type === 'numerical') return { ...base, answer: '18.015 g/mol', explanation: 'Given:\n- Atomic masses: H = 1.008, O = 15.999\n\nTo find: molar mass of $\\ce{H2O}$\n\nConcept / formula: $M = \\sum n_i A_i$\n\nSteps:\n1. $M = 2(1.008) + 15.999$\n2. $M = \\frac{18.015}{1}\\ \\text{g/mol}$\n\nAnswer: $18.015\\ \\text{g mol}^{-1}$' };
+    if (a.type === 'short_answer' || a.type === 'long_answer') return { ...base, answer: '- Equal volumes of gases\n- at the same temperature and pressure\n- contain equal numbers of molecules ($V \\propto n$)', explanation: null };
+    if (a.options) return { ...base, answer: Object.keys(a.options).includes('B') ? 'B' : Object.keys(a.options)[0], explanation: 'Hydrogen is evolved: $\\ce{Zn + H2SO4 -> ZnSO4 + H2 ^}$' };
+    return { ...base, confident: false, answer: null, explanation: null, notes: 'The figure is missing.' };
+  });
+  return { status: 200, body: { candidates: [{ content: { parts: [{ text: JSON.stringify({ solutions }) }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 60 } } };
+}
+
 const fakeFetch = async (input, init) => {
   const url = String(input instanceof Request ? input.url : input);
   if (url.includes('generativelanguage.googleapis.com')) {
     const headers = new Headers(init?.headers);
     log.gemini.push({ url: url.replace(/key=[^&]*/, 'key=…'), keyInUrl: /[?&]key=/.test(url), keyHeader: Boolean(headers.get('x-goog-api-key')), bytes: String(init?.body ?? '').length });
-    const r = geminiReply(control.gemini);
+    const isSolve = !String(init?.body ?? '').includes('inline_data');
+    log.gemini[log.gemini.length - 1].solve = isSolve;
+    log.gemini[log.gemini.length - 1].model = (url.match(/models\/([^:]+):/) ?? [])[1];
+    const r = isSolve && !['quota', 'garbage', 'blocked'].includes(control.gemini) ? solveReply(String(init.body)) : geminiReply(control.gemini);
     return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'content-type': 'application/json' } });
   }
   return fetch(input, init);
@@ -126,11 +145,12 @@ const fakeFetch = async (input, init) => {
 
 const functionEnv = {
   SUPABASE_URL: ORIGIN, SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: ANON }), GEMINI_API_KEY: 'test-gemini-key', GEMINI_MODEL: 'test-model',
-  AI_DAILY_LIMIT: '20', ALLOWED_ORIGINS: '*',
+  GEMINI_SOLVE_MODEL: 'test-strong-model', AI_DAILY_LIMIT: '20', ALLOWED_ORIGINS: '*',
 };
 const handlers = {
   'save-questions': route(handleSave, { log: () => {} }),
   'extract-question': route(handleExtract, { log: () => {} }),
+  'solve-questions': route(handleSolve, { log: () => {} }),
 };
 
 // ------------------------------------------------------------------ HTTP plumbing
@@ -242,7 +262,7 @@ async function functionsApi(req, res, url) {
 }
 
 // ------------------------------------------------------------------ static site (+ web/_headers)
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.woff2': 'font/woff2' };
 const WEB = join(ROOT, 'web');
 const globalHeaders = {};
 {

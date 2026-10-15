@@ -25,7 +25,17 @@ export function createGeminiProvider(cfg) {
   return {
     id: 'gemini',
     model,
-    async extract({ image, system, userText, schema, signal }) {
+    extract({ image, system, userText, schema, signal }) {
+      return generate({ parts: [{ inline_data: { mime_type: image.mimeType, data: toBase64(image.bytes) } }], system, userText, schema, signal });
+    },
+    /** Text only (no image): used by "Solve with AI". */
+    solve({ system, userText, schema, signal }) {
+      return generate({ parts: [], system, userText, schema, signal, maxOutputTokens: 16384, timeoutMs: 110_000 });
+    },
+  };
+
+  async function generate({ parts, system, userText, schema, signal, maxOutputTokens = 16384, timeoutMs: callTimeout }) {
+    {
       // Google sometimes rejects a schema style with a bare "invalid argument" (it differs between model
       // generations). So on that exact error we retry with a simpler request: first the standard JSON
       // Schema field, then no schema at all (the schema is described in the prompt and the answer is still
@@ -39,21 +49,18 @@ export function createGeminiProvider(cfg) {
         systemInstruction: { parts: [{ text: system }] },
         contents: [{
           role: 'user',
-          parts: [
-            { inline_data: { mime_type: image.mimeType, data: toBase64(image.bytes) } },
-            { text: v.text },
-          ],
+          parts: [...parts, { text: v.text }],
         }],
         generationConfig: {
           responseMimeType: 'application/json',
           ...v.gen,
           temperature: 0.1,
-          maxOutputTokens: 8192,
+          maxOutputTokens,
         },
       });
 
       for (let i = 0; i < variants.length; i++) {
-        const timeout = AbortSignal.timeout(timeoutMs);
+        const timeout = AbortSignal.timeout(callTimeout ?? timeoutMs);
         const combined = signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : timeout;
         let res;
         try {
@@ -82,8 +89,8 @@ export function createGeminiProvider(cfg) {
         return parseSuccess(payload);
       }
       throw new AiError('AI_UNAVAILABLE', 'The AI service is having trouble right now. Try again shortly.');
-    },
-  };
+    }
+  }
 }
 
 // Gemini-style schema (UPPERCASE types, nullable) -> standard JSON Schema (lowercase, type arrays).

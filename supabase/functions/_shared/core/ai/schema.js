@@ -15,9 +15,9 @@ export const AI_QUESTION_PROPERTIES = {
   options: strList('Answer options as plain text WITHOUT the A./(a)/1. labels. Empty for non-choice types.'),
   match_left: strList('List I items for match_following, in printed order, without labels.'),
   match_right: strList('List II items for match_following, in printed order, without labels.'),
-  answer: str('Choice types: the option letter (A, B, ...). Numerical: the number with optional unit. Match: pairs like "A-2, B-1". Other types: the answer text. null if unknown.', true),
-  answer_source: { type: 'STRING', enum: ['extracted', 'inferred', 'none'], description: 'extracted = the answer is printed in the image; inferred = you worked it out; none = unknown.' },
-  explanation: str('Solution/explanation text, or null.', true),
+  answer: str('ALWAYS give it. Choice types: the option letter (A, B, ...). Numerical: the final number then the unit only. Match: pairs like "A-2, B-1". Short/long/fill-blank: the model answer (one point per line starting with "- " for short/long). null only if it truly cannot be answered from the image.', true),
+  answer_source: { type: 'STRING', enum: ['extracted', 'inferred', 'none'], description: 'extracted = the answer is printed in the image; inferred = you solved it yourself; none = impossible to answer (missing data/figure).' },
+  explanation: str('ALWAYS give it. Numerical: the worked solution with the lines Given / To find / Concept / formula / Steps / Answer. Other types: a short reason or the key concept. Use LaTeX between $ signs for real maths.', true),
   explanation_source: { type: 'STRING', enum: ['extracted', 'generated', 'none'], description: 'extracted = printed in the image; generated = you wrote it; none = no explanation.' },
   subject_id: { type: 'INTEGER', nullable: true, description: 'Subject id from the provided list, or null.' },
   chapter_id: { type: 'INTEGER', nullable: true, description: 'Chapter id from the provided list, or null.' },
@@ -65,3 +65,28 @@ export function buildResponseSchema() {
 }
 
 export const AI_LIMITS = Object.freeze({ maxQuestions: AI_MAX_QUESTIONS, questionChars: LIMITS.questionText });
+
+// ---- "Solve with AI": text in, answers out -------------------------------------------------------------------
+export const SOLVE_MAX_ITEMS = 5;
+export const SOLVE_PROPERTIES = {
+  key: str('The key of the question being solved, copied exactly.'),
+  answer: str('The answer in the format for the question type (option letter, number then unit, "A-2, B-1", or the model answer text). null only if it cannot be solved.', true),
+  explanation: str('The worked solution / reason, as described in the rules. null only if the answer is null.', true),
+  confident: { type: 'BOOLEAN', description: 'true only if you are sure of the final answer after checking.' },
+  notes: str('Anything the teacher should check, or why it could not be solved. null if nothing.', true),
+};
+export const SOLVE_KEYS = Object.keys(SOLVE_PROPERTIES);
+
+export function buildSolveSchema() {
+  return {
+    type: 'OBJECT',
+    properties: {
+      solutions: {
+        type: 'ARRAY',
+        maxItems: SOLVE_MAX_ITEMS,
+        items: { type: 'OBJECT', properties: SOLVE_PROPERTIES, required: ['key', 'confident'], propertyOrdering: SOLVE_KEYS },
+      },
+    },
+    required: ['solutions'],
+  };
+}
