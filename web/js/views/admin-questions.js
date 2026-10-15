@@ -1,5 +1,5 @@
 // All questions (any status) and the single-question editor.
-import { html, confirmDialog, toast } from '../dom.js';
+import { html, rich, confirmDialog, toast } from '../dom.js';
 import { navigate, withQuery } from '../router.js';
 import * as api from '../api.js';
 import { QUESTION_TYPES, STATUSES } from '../core/constants.js';
@@ -83,7 +83,7 @@ export default async function list(ctx, body) {
       ${res.items.map((it) => {
         const s = tax.index.subjectById.get(it.subject_id); const c = tax.index.chapterById.get(it.chapter_id);
         return html`<tr data-pid="${it.public_id}"><td><input type="checkbox" data-sel aria-label="Select ${it.public_id}"></td>
-          <td class="nowrap"><a href="/admin/edit/${it.public_id}">${it.public_id}</a></td><td class="q-cell">${short(it.question_text)}</td>
+          <td class="nowrap"><a href="/admin/edit/${it.public_id}">${it.public_id}</a></td><td class="q-cell"><div class="clamp">${rich(it.question_text)}</div></td>
           <td class="nowrap" data-label="Type">${QUESTION_TYPES[it.type_code]?.label}</td><td data-label="Where">${s?.name ?? ''}${c ? html`<br><span class="muted small">${c.name}</span>` : ''}</td>
           <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}${flags[it.id] ? html` <span class="badge ai" title="The AI wrote this answer. Read it, then press Mark as checked.">AI-solved: check</span>` : ''}</td>
           <td class="actions"><div class="act">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button>`)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a>${flags[it.id] ? html`<button type="button" class="btn-sm" data-checked>Mark as checked</button>` : ''}<button type="button" class="btn-sm btn-danger" data-del>Delete</button></div></td></tr>`;

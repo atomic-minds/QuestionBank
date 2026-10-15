@@ -1,6 +1,6 @@
 // Review screen: every imported or AI-read question lands here first. Nothing is saved until the
 // admin has looked at it and chosen "Save". Items fail or succeed one by one.
-import { html, confirmDialog, toast } from '../dom.js';
+import { html, rich, confirmDialog, toast } from '../dom.js';
 import { navigate } from '../router.js';
 import * as api from '../api.js';
 import { QUESTION_TYPES } from '../core/constants.js';
@@ -57,7 +57,7 @@ export default async function review(ctx, body) {
           ${figureStore.has(it.key) ? html`<span class="badge published">Picture added</span>` : (it.meta?.has_figure ? html`<span class="badge draft">Has a figure: add a picture</span>` : '')}
           ${it.photo ? html`<span class="muted small">Photo ${it.photo.n}</span>` : ''}
           ${it.saved ? html`<span class="badge published">Saved as ${it.saved.public_id}</span>` : (it.ok ? html`<span class="badge review">Ready</span>` : html`<span class="badge draft">Needs fixing</span>`)}</div>
-        <div class="t pre">${short(it.draft?.question_text ?? '')}</div>
+        <div class="t pre clamp">${rich(it.draft?.question_text ?? '')}</div>
         ${figureStore.has(it.key) ? html`<img class="thumb" alt="Picture for question ${n}" src="${figureUrl(figureStore.get(it.key))}">` : ''}
         <ul>${it.errors.map((e) => html`<li class="e">${e.message}</li>`)}${it.warnings.map((w) => html`<li class="w">${w.message}</li>`)}
           ${it.saveError ? html`<li class="e">${it.saveError.message}</li>` : ''}</ul>

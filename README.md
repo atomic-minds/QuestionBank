@@ -25,7 +25,8 @@ New here? Follow **[docs/SETUP-GUIDE.md](docs/SETUP-GUIDE.md)**: a step-by-step 
 * Import: paste or upload JSON (single, list, or the formats in [docs/EXPORT-FORMAT.md](docs/EXPORT-FORMAT.md)); up to 100 per paste; every item is validated alone, errors are listed per item, and the valid ones can be approved selectively.
 * Duplicates: exact duplicates are blocked; near duplicates are flagged with similarity and a link, and need an explicit "this is different" confirmation.
 * Lifecycle: draft → review → published → archived. Only published questions are public.
-* Public site: responsive, light/dark; browse by subject → chapter → topic → type → exam/general; global search (text, tags, or an ID like `QB-CHEM-000123`); filters (subject, chapter, topic, type, exam, year, difficulty, marks, tags); *Show answer* with explanation; shareable links.
+* Public site: responsive, light/dark; browse by subject → chapter → topic → type → exam/general; global search (text, tags, or an ID like `QB-CHEM-000123`); a filter bar of dropdowns across the top (subject, chapter, topic, type, exam, year, difficulty, marks, tag) with nothing listed until a filter is chosen; *Show answer* with explanation; shareable links.
+* Admin can delete any question (single, row or bulk) after a strong confirmation (typing DELETE for published or several).
 * Export: Atomic Minds JSON (versioned, keeps the bank ID), readable plain text, full backup/restore; by filter or by hand-picked list.
 * Security: admin sign-in, an admin allow-list enforced **inside the database**, row-level security on every table, no secrets in the website, upload checks, size caps, a daily AI cap.
 
@@ -35,7 +36,7 @@ New here? Follow **[docs/SETUP-GUIDE.md](docs/SETUP-GUIDE.md)**: a step-by-step 
 | --- | --- | --- |
 | Website | Plain HTML/CSS/JavaScript (no build step) on **Cloudflare Workers static assets** | Nothing to compile or install; static assets are free and cannot generate compute charges; deploys from Git. |
 | Database + login | **Supabase Free** (Postgres, email + password Auth) | Real relational data, full-text and fuzzy search (`pg_trgm`), and row-level security, all in one free product. |
-| Server code | Two **Supabase Edge Functions** (`extract-question`, `save-questions`) | The only places that need a secret (the AI key) or multi-step checks. |
+| Server code | Three **Supabase Edge Functions** (`extract-question`, `solve-questions`, `save-questions`) | The only places that need a secret (the AI key) or multi-step checks. |
 | AI | **Google Gemini** free tier, behind a small provider interface | Reads images. The key lives only in Supabase secrets. |
 | Code hosting | GitHub (free) | Cloudflare deploys from it; a scheduled job keeps Supabase awake. |
 
@@ -48,7 +49,7 @@ Firestore or MongoDB were considered and rejected: this data is relational (subj
 | Service | Purpose | Plan | Monthly cost | Requires billing? |
 | --- | --- | --- | --- | --- |
 | Cloudflare Workers (static assets) | Hosts the website | Free | ₹0 | No |
-| Supabase | Database, login, two functions | Free | ₹0 | No |
+| Supabase | Database, login, three functions | Free | ₹0 | No |
 | Google AI Studio / Gemini API | Reads images (optional) | Free tier | ₹0 | No — **never link a billing account** |
 | GitHub | Code + keep-alive job | Free | ₹0 | No |
 | **Total** | | | **₹0** | **No** |
@@ -80,9 +81,10 @@ Secrets for the functions (`npx supabase secrets set …`, see `.env.example`):
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | for AI | Gemini key from Google AI Studio |
-| `GEMINI_MODEL` | for AI | exact model code; no default on purpose |
+| `GEMINI_MODEL` | for AI | exact model code for reading photos; no default on purpose |
+| `GEMINI_SOLVE_MODEL` | no | stronger free model for "Solve with AI" (falls back to `GEMINI_MODEL`) |
 | `AI_PROVIDER` | no | `gemini` (default) |
-| `AI_DAILY_LIMIT` | no | image reads per day (default 20, clamped to 0–1000) |
+| `AI_DAILY_LIMIT` | no | AI uses per day, photo reads and Solve together (default 20, clamped to 0–1000) |
 | `ALLOWED_ORIGINS` | no | comma-separated site origins, default `*` |
 | `DB_SOFT_LIMIT_MB` | no | pause new questions at this size (default 450) |
 | `QB_PUBLISHABLE_KEY` | no | only if Supabase stops injecting its own keys |
@@ -137,7 +139,7 @@ npm run test:e2e    # 101 browser checks: real site + real database + real funct
 * Questions are text. Diagrams/figures are not stored (by design); mention them in the question text or add a link in *Source*.
 * One admin level: every admin can do everything.
 * Backups through the website: up to 1000 questions per file can be restored through the review screen (4 MB); the export refuses to produce a backup larger than that (or an export of more than 20,000 questions) rather than silently cutting it, and tells you to export one subject at a time. A complete database copy is `npx supabase db dump`.
-* Hardening backlog: request-size limits for the two functions rely on the declared size first (only admins can reach them); `SECURITY DEFINER` functions pin `search_path` to `public` (adding `pg_temp` last would be a further belt-and-braces step).
+* Hardening backlog: request-size limits for the three functions rely on the declared size first (only admins can reach them); `SECURITY DEFINER` functions pin `search_path` to `public` (adding `pg_temp` last would be a further belt-and-braces step).
 
 ## Layout
 

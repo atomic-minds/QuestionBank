@@ -511,3 +511,6 @@ dialog .field { margin-top: .9rem; }
 /* "Solve with AI" bar in the editor */
 .solve-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin: .25rem 0 1rem; }
 .solve-bar .hint { margin: 0; flex: 1 1 14rem; }
+
+/* long question text in lists: show a few lines of the formatted text, not raw $...$ source */
+.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; overflow: hidden; }
