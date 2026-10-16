@@ -220,7 +220,8 @@ legend { font-weight: 650; padding: 0 .45rem; }
 .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; gap: 1rem; }
 
 /* ------------------------------------------------------------------ a question */
-.qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: .9rem; }
+.qlist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .9rem; }
+.qlist > li { min-width: 0; }
 .q { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-xl); padding: 1.15rem 1.1rem 1.1rem; box-shadow: var(--shadow); }
 @media (min-width: 560px) { .q { padding: 1.4rem 1.5rem 1.3rem; } }
 .q-meta { display: flex; gap: .45rem .6rem; flex-wrap: wrap; align-items: center; font-size: .8rem; color: var(--muted); margin-bottom: .85rem; }
@@ -316,7 +317,7 @@ td.actions .act { display: flex; flex-wrap: wrap; gap: .35rem; max-width: 240px;
 .sticky-bar { position: sticky; bottom: 0; background: var(--glass); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border-top: 1px solid var(--rule); padding: .8rem 0 calc(.8rem + env(safe-area-inset-bottom)); margin-top: 1.5rem; z-index: 5; display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
 .sticky-bar label { white-space: nowrap; margin: 0; }
 .item-list { list-style: none; padding: 0; margin: 0; }
-.item { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--surface); margin-bottom: .7rem; padding: .85rem 1rem; display: grid; grid-template-columns: auto 1fr auto; gap: .8rem; align-items: start; box-shadow: var(--shadow); }
+.item { border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--surface); margin-bottom: .7rem; padding: .85rem 1rem; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .8rem; align-items: start; box-shadow: var(--shadow); }
 .item.bad { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
 .item .t { font-family: var(--font-read); }
 .item ul { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .88rem; }
@@ -365,7 +366,8 @@ dialog[open] { animation: pop .18s ease-out; }
 
 @media (max-width: 640px) {
   .pairs, .match-grid { grid-template-columns: 1fr; }
-  .item { grid-template-columns: 1fr; }
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .item > * { min-width: 0; }
   .hero { padding-top: 1.5rem; }
 }
 
@@ -504,7 +506,7 @@ dialog .field { margin-top: .9rem; }
 .math { white-space: normal; }
 .math-block { display: block; margin: .6rem 0; overflow-x: auto; overflow-y: hidden; padding: .15rem 0; }
 .math:not(.math-block) { overflow-wrap: normal; }
-.katex { font-size: 1.06em; }
+.math .katex, .math.katex { font-size: 1.04em; }   /* KaTeX's own stylesheet loads later and says 1.21em; this is more specific so it wins */
 .katex-display { margin: .4rem 0; overflow-x: auto; overflow-y: hidden; }
 .pre .math-block, .q-text .math-block, .answer .math-block { max-width: 100%; }
 
@@ -514,3 +516,7 @@ dialog .field { margin-top: .9rem; }
 
 /* long question text in lists: show a few lines of the formatted text, not raw $...$ source */
 .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; line-clamp: 5; overflow: hidden; }
+
+/* a formula too wide for its line scrolls by itself instead of widening the page */
+.math.math-wide { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-bottom: .15rem; }
+.clamp .math.math-wide { overflow-x: auto; }
