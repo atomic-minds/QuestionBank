@@ -900,6 +900,49 @@ def main():
             check('when Google refuses a solve, the use is given back', ctl(sql='select coalesce(sum(used),0) from public.ai_usage')['out'].strip().split()[-1] == used0, used0)
             ctl(gemini='ok')
 
+            # ------------------------------------------------------------ create missing topics from the review page
+            PROBE_TEXT = {1: 'Name the particle that Thomson found in cathode rays', 2: 'Which scientist proposed the nuclear model of the atom', 3: 'State the charge on one proton in coulombs',
+                          4: 'Give the maximum number of electrons in the M shell', 5: 'What does the azimuthal quantum number describe'}
+            def probe(n, topic, chapter='Structure of Atom'):
+                return {"type": "short_answer", "question": f"{PROBE_TEXT[n]} (e2e topic probe {n})", "answer": "x", "subject": "Chemistry", "chapter": chapter, "topic": topic}
+            def topics_named(name):
+                return ctl(sql=f"select count(*) from public.topics where lower(name) = lower('{name}')")['out'].strip().split()[-1]
+            go('/admin/add?tab=json')
+            page.fill('#json', json.dumps({"questions": [probe(1, 'Zeta Particles Probe'), probe(2, 'zeta  particles probe'), probe(3, 'Omega Models Probe')]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('.item-list')
+            note = page.locator('#topic-note')
+            check('names missing from the taxonomy are listed with a button', note.count() == 1 and 'Zeta Particles Probe' in note.inner_text() and 'Omega Models Probe' in note.inner_text() and '2 topics' in note.inner_text(), note.inner_text() if note.count() else 'no note')
+            check('the two spellings of one topic are listed once, with a count', '2 questions' in note.inner_text() and note.locator('li').count() == 2, note.inner_text())
+            check('the button says what it will do', page.locator('[data-act=make-topics]').inner_text().strip() == 'Create these 2 topics', page.locator('[data-act=make-topics]').inner_text())
+            check('nothing is created before the button is pressed', topics_named('Zeta Particles Probe') == '0' and topics_named('Omega Models Probe') == '0')
+            page.set_viewport_size({'width': 390, 'height': 844}); no_overflow('topic note on the review page (phone)'); shot('10-topic-note-phone'); page.set_viewport_size({'width': 1280, 'height': 900})
+            page.click('[data-act=make-topics]')
+            until(lambda: page.locator('#topic-note').count() == 0, 15, 'note gone')
+            check('pressing the button creates each topic once', topics_named('Zeta Particles Probe') == '1' and topics_named('Omega Models Probe') == '1', topics_named('Zeta Particles Probe'))
+            check('the topics sit under the chapter named in the file', ctl(sql="select count(*) from public.topics t join public.chapters c on c.id = t.chapter_id where c.name = 'Structure of Atom' and t.name in ('Zeta Particles Probe', 'Omega Models Probe')")['out'].strip().endswith('2'))
+            check('the "no topic was set" notes are gone and the questions are still ready', page.locator('.item .w', has_text='no topic was set').count() == 0 and page.locator('.badge.review', has_text='Ready').count() == 3)
+            page.select_option('#st', 'draft'); page.click('[data-act=save]')
+            until(lambda: page.locator('.badge', has_text='Saved as').count() == 3 or '/admin/questions' in page.url, 20, 'probes saved')
+            until(lambda: ctl(sql="select count(*) from public.questions where question_text like '%(e2e topic probe%' and topic_id is not null")['out'].strip().endswith('3'), 15, 'topics stored')
+            check('all three saved questions carry their topic', True)
+            check('the two spellings share one topic row', ctl(sql="select count(distinct topic_id) from public.questions where question_text like '%(e2e topic probe%'")['out'].strip().endswith('2'))
+            # the same names again: they exist now, so they are linked at once and no note or button appears
+            go('/admin/add?tab=json')
+            page.fill('#json', json.dumps({"questions": [{**probe(4, 'ZETA particles probe'), "question": PROBE_TEXT[4] + ' (e2e topic probe 4 repeat)'}]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('.item-list')
+            check('a name that already exists is matched, not offered again', page.locator('#topic-note').count() == 0 and page.locator('.item .w', has_text='no topic was set').count() == 0)
+            # a hidden topic with the same name cannot be created again: say so, keep the note, change nothing
+            ctl(sql="insert into public.topics (chapter_id, name, slug, is_active) select id, 'Hidden Probe Topic', 'hidden-probe-topic', false from public.chapters where name = 'Structure of Atom'")
+            go('/admin/add?tab=json')
+            page.fill('#json', json.dumps({"questions": [{**probe(5, 'Hidden Probe Topic'), "question": PROBE_TEXT[5] + ' (e2e topic probe 5 hidden)'}]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('#topic-note')
+            page.click('[data-act=make-topics]')
+            page.wait_for_selector('.toast.bad')
+            check('a hidden topic of the same name is explained, not duplicated', 'hidden' in page.inner_text('.toast.bad').lower() and topics_named('Hidden Probe Topic') == '1', page.inner_text('.toast.bad'))
+            check('the note stays so the admin can fix it', page.locator('#topic-note').count() == 1 and page.locator('[data-act=make-topics]').is_enabled())
+            page.click('[data-act=clear]'); page.click('dialog button[value=ok]'); page.wait_for_url('**/admin/add')
+            ctl(sql="delete from public.questions where question_text like '%(e2e topic probe%'")
+
             # ------------------------------------------------------------ session handling
             go('/admin')
             page.evaluate("(() => { const s = JSON.parse(localStorage.getItem('qb.session')); s.expires_at = 1; localStorage.setItem('qb.session', JSON.stringify(s)); })()")

@@ -10,6 +10,7 @@ import { clearDrafts, figureStore, getDrafts, persistDrafts, photoStore } from '
 import { figureUrl } from './image-tools.js';
 import { mountEditor } from './editor.js';
 import { applySolution, hasAnswer, solvable, solveMany, solvedMeta, summarize } from './solve.js';
+import { attachCreated, forgetTopicIfChapterChanged, linkKnownTopics, pendingTopics } from './topic-fix.js';
 
 const short = (t, n = 220) => (t.length > n ? `${t.slice(0, n)}…` : t);
 
@@ -22,13 +23,15 @@ export default async function review(ctx, body) {
       <p><a class="btn btn-primary" href="/admin/add">Add questions</a> <a class="btn" href="/admin/questions?status=draft">See saved drafts</a></p></div>`.toString();
     return;
   }
-  const tax = await api.getTaxonomy({ force: true });
+  let tax = await api.getTaxonomy({ force: true });
   if (ctx.stale()) return;
+  if (linkKnownTopics(sess.items, tax.index)) persistDrafts();   // topics added in the Taxonomy since the file was read
   const examIds = new Set(tax.exams.map((e) => e.id));
   const restore = sess.mode === 'restore';
   const handles = new Map();
   const open = new Set();
   let saveStatus = 'draft';
+  let creating = false;                                   // topics are being created
 
   const find = (key) => sess.items.find((i) => i.key === key);
   const label = (it) => QUESTION_TYPES[it.draft?.type_code]?.label ?? 'Question';
@@ -89,18 +92,67 @@ export default async function review(ctx, body) {
     const live = sess.items.filter((i) => !i.saved);
     const sel = sess.items.filter((i) => i.selected && i.ok && !i.saved && !blocked(i));
     body.querySelector('#sum').innerHTML = html`${sess.items.length} read · ${live.filter((i) => i.ok).length} ready · ${live.filter((i) => !i.ok).length} need fixing · ${sess.items.filter((i) => i.saved).length} saved`.toString();
+    const host = body.querySelector('#topic-host');
+    if (host && !creating) host.innerHTML = topicNote().toString();   // keeps the note in step with edits and discards
     const btn = body.querySelector('[data-act=save]');
     btn.disabled = sel.length === 0;
     btn.textContent = sel.length ? `Save ${sel.length} selected` : 'Nothing selected';
     persistDrafts();
   }
 
+  /** Subjects and chapters are never created for you; a wrong chapter would scatter your questions. */
+  const otherMissing = () => (sess.missing ? [...sess.missing.subjects.map((x) => `subject “${x}”`), ...sess.missing.chapters.map((x) => `chapter “${x.name}”`)] : []);
+
+  function topicNote() {
+    const list = pendingTopics(sess.items, tax.index);
+    if (!list.length) return '';
+    const n = list.length;
+    return html`<div class="notice warn" id="topic-note"><b>${n} topic${n === 1 ? ' is' : 's are'} not in your taxonomy yet.</b>
+      <ul class="topic-list">${list.map((g) => html`<li>“${g.name}” <span class="muted">in ${g.chapter} · ${g.count} question${g.count === 1 ? '' : 's'}</span></li>`)}</ul>
+      <p class="small">Nothing is created until you press the button. Check the spelling first. Each topic is added under the chapter shown, and the questions are linked to it.</p>
+      <button type="button" class="btn-sm btn-primary" data-act="make-topics">Create ${n === 1 ? 'this topic' : `these ${n} topics`}</button></div>`;
+  }
+
+  /** Create the missing topics (only when the admin presses the button) and link the questions to them. */
+  async function makeTopics() {
+    const list = pendingTopics(sess.items, tax.index);
+    if (!list.length) return;
+    sess.items.forEach((it) => { const h = handles.get(it.key); if (h && open.has(it.key) && !it.saved) it.draft = h.read(); });   // keep what was typed
+    if (creating) return;
+    creating = true;
+    const btn = body.querySelector('[data-act=make-topics]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    const ids = new Map();
+    const failed = [];
+    const nextAt = new Map();
+    for (const g of list) {
+      const known = tax.index.chapterById.get(g.chapter_id)?.topics.length ?? 0;
+      const at = nextAt.get(g.chapter_id) ?? (known + 1) * 10;
+      nextAt.set(g.chapter_id, at + 10);
+      try {
+        const r = await api.createTopic({ chapter_id: g.chapter_id, name: g.name, sort_order: at });
+        const row = Array.isArray(r) ? r[0] : r;
+        if (row?.id) ids.set(g.key, row.id); else failed.push(`“${g.name}”`);
+      } catch (e) {
+        if (e.code === 'UNAUTHENTICATED') throw e;
+        failed.push(e.status === 409 || e.code === 'DUPLICATE_EXACT' ? `“${g.name}” (a hidden topic with this name may exist: show it again under Taxonomy)` : `“${g.name}”: ${e.message}`);
+      }
+    }
+    try { tax = await api.getTaxonomy({ force: true }); } catch (e) { toast(`Topics were created, but the list could not be refreshed: ${e.message}`, 'bad'); }
+    const linked = attachCreated(sess.items, tax.index, ids);
+    creating = false;
+    renderAll();
+    if (ids.size) toast(`${ids.size} topic${ids.size === 1 ? '' : 's'} created and ${linked} question${linked === 1 ? '' : 's'} linked.`, failed.length ? '' : 'ok');
+    if (failed.length) toast(`Could not create ${failed.join('; ')}`, 'bad');
+  }
+
   function renderAll() {
     body.innerHTML = html`<div class="page-head"><div><h1>Review drafts</h1><p class="muted" id="sum"></p></div>
       <div class="row"><button type="button" class="btn-sm" data-act="all">Select all ready</button><button type="button" class="btn-sm" data-act="none">Select none</button><button type="button" class="btn-sm" data-act="solve-all">Solve with AI…</button><button type="button" class="btn-sm btn-danger" data-act="clear">Discard all</button></div></div>
       ${sess.notes.map((n) => html`<div class="notice warn">${n}</div>`)}
-      ${sess.missing && (sess.missing.chapters.length || sess.missing.topics.length || sess.missing.subjects.length) ? html`<div class="notice warn"><b>Some names are not in your taxonomy yet.</b>
-        ${[...sess.missing.subjects.map((x) => `subject “${x}”`), ...sess.missing.chapters.map((x) => `chapter “${x.name}”`), ...sess.missing.topics.map((x) => `topic “${x.name}”`)].join(', ')}.
+      <div id="topic-host">${topicNote()}</div>
+      ${otherMissing().length ? html`<div class="notice warn"><b>Some names are not in your taxonomy yet.</b>
+        ${otherMissing().join(', ')}.
         Add them under <a href="/admin/taxonomy">Taxonomy</a>, or pick another one in Edit.</div>` : ''}
       <ol class="item-list">${sess.items.map((it, i) => rowHtml(it, i + 1))}</ol>
       <div class="sticky-bar">
@@ -230,8 +282,9 @@ export default async function review(ctx, body) {
         if (h.aiSolved()) it.meta = { ...(it.meta ?? {}), ...h.meta() };
         const pic = h.image().value;
         if (pic) figureStore.set(it.key, pic); else figureStore.delete(it.key);
+        const chapterBefore = it.draft.chapter_id;
         const v = validateQuestionInput(h.read(), { taxonomy: tax.index.tree, examIds });
-        it.draft = v.ok ? v.value : h.read(); it.errors = v.errors; it.warnings = []; it.ok = v.ok; it.saveError = null; it.confirmNear = false;
+        it.draft = v.ok ? v.value : h.read(); forgetTopicIfChapterChanged(it, chapterBefore); it.errors = v.errors; it.warnings = []; it.ok = v.ok; it.saveError = null; it.confirmNear = false;
         if (v.ok) { open.delete(it.key); it.selected = true; await checkDuplicates([it]); if (blocked(it)) it.selected = false; refresh(it); } else { refresh(it); toast('Some fields still need fixing.', 'bad'); }
         break;
       }
@@ -241,6 +294,7 @@ export default async function review(ctx, body) {
         if (await confirmDialog({ title: 'Discard all drafts?', body: 'Nothing here has been saved. This clears the whole list.', confirmLabel: 'Discard all', danger: true })) { clearDrafts(); navigate('/admin/add'); }
         break;
       case 'save': await save(); break;
+      case 'make-topics': await makeTopics(); break;
       default:
     }
   });

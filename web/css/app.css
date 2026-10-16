@@ -261,6 +261,7 @@ legend { font-weight: 650; padding: 0 .45rem; }
 .empty-state { padding: 2.25rem 1.25rem; border: 1px dashed var(--rule-strong); border-radius: var(--r-lg); }
 .notice { padding: .85rem 1.05rem; border-radius: var(--r-md); border: 1px solid var(--rule-strong); background: var(--surface); margin: 1rem 0; }
 .notice.bad { background: var(--bad-wash); border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+.topic-list { margin: .45rem 0 .55rem 1.1rem; padding: 0; }
 .notice.warn { background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn) 55%, transparent); }
 .notice.ok { background: var(--ok-wash); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
 .loading { color: var(--muted); padding: 2rem 0; }
