@@ -5,7 +5,7 @@ import { isPlainObject } from '../text.js';
 import { finalizeBatch, normalizeImportItem } from '../importer.js';
 import { AI_MAX_QUESTIONS, AI_QUESTION_KEYS } from './schema.js';
 import { AiError } from './provider.js';
-import { repairTex } from '../chem.js';
+import { balanceMath, repairTex } from '../chem.js';
 import { QUESTION_TYPES } from '../constants.js';
 import { SOLVE_KEYS, SOLVE_MAX_ITEMS } from './schema.js';
 
@@ -15,7 +15,7 @@ const SOURCES_ANSWER = new Set(['extracted', 'inferred', 'none']);
 const SOURCES_EXPLANATION = new Set(['extracted', 'generated', 'none']);
 
 const orUndef = (v) => (v === null || v === undefined ? undefined : v);
-const fixText = (v) => (typeof v === 'string' ? repairTex(v) : v);
+const fixText = (v) => (typeof v === 'string' ? balanceMath(repairTex(v)) : v);
 /** A short or long answer IS its own explanation, so an explanation the AI adds there is only noise (a topic name, a repeat). */
 const NO_EXPLANATION_TYPES = new Set(['short_answer', 'long_answer']);
 

@@ -816,6 +816,12 @@ def main():
             page.click('[data-act=solve-all]'); page.wait_for_selector('dialog[open]')
             check('bulk solve says how many AI uses it costs', 'AI uses' in page.inner_text('dialog'), page.inner_text('dialog')[:200])
             page.click('dialog button[value=cancel]'); until(lambda: page.locator('dialog').count() == 0, 5, 'closed')
+            page.set_viewport_size({'width': 390, 'height': 844})
+            page.evaluate("""() => { const t = document.querySelector('.item .t'); t.innerHTML = '<span class="math" data-tex="\\\\mathrm{Sn(s) | Sn^{2+}(0.004\\\\,M) || H^{+}(0.02\\\\,M) | H_2(g)(1\\\\,Bar) | Pt(s) | Sn(s) | Sn^{2+}(0.004\\\\,M)}">x</span>'; }""")
+            until(lambda: page.locator('.item .t .katex').count() >= 1, 15, 'long formula in review')
+            page.wait_for_timeout(300)
+            no_overflow('long formula on the review page (phone)')
+            page.set_viewport_size({'width': 1280, 'height': 900})
             shot('07-solved-review')
             page.click('[data-act=all]'); page.select_option('#st', 'draft'); page.click('[data-act=save]')
             until(lambda: page.locator('.badge', has_text='Saved as').count() == 2 or '/admin/questions' in page.url, 20, 'both saved')
@@ -857,6 +863,14 @@ def main():
             shot('08-maths-public')
             page.set_viewport_size({'width': 390, 'height': 844}); go(f'/q/{npid}'); page.click('[data-action=reveal]')
             until(lambda: page.locator('.exp .katex').count() >= 3, 15, 'maths drawn on phone'); no_overflow('maths question (phone)'); shot('09-maths-phone')
+            # a long formula that cannot break (a cell diagram) must not widen the page on a phone
+            ctl(sql=f"update public.questions set question_text = 'Write the cell reaction: $\\\\mathrm{{Sn(s) | Sn^{{2+}}(0.004\\\\,M) || H^{{+}}(0.02\\\\,M) | H_2(g)(1\\\\,Bar) | Pt(s) | Sn(s) | Sn^{{2+}}(0.004\\\\,M)}}$ (given data)' where public_id = '{npid}'")
+            page.set_viewport_size({'width': 390, 'height': 844}); go(f'/q/{npid}')
+            until(lambda: page.locator('.q-text .katex, .qlist .katex').count() >= 1, 15, 'long formula drawn')
+            until(lambda: page.locator('.math-wide').count() >= 1, 10, 'wide formula detected')
+            no_overflow('long cell-diagram formula (phone)')
+            check('a formula too wide for the phone becomes its own scrollable line', page.locator('.math-wide').count() >= 1)
+            page.set_viewport_size({'width': 1280, 'height': 900})
             page.set_viewport_size({'width': 1280, 'height': 900})
 
             # a short answer written as points, then the bulk solve on saved questions

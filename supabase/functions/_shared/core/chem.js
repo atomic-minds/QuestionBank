@@ -176,6 +176,7 @@ export function splitMath(text) {
       while (j < text.length && j - i <= 501) {
         if (text[j] === '\\') { j += 2; continue; }
         if (text[j] === '$') break;
+        if (text[j] === '\n') { j = text.length; break; }          // an inline formula never spans lines: a stray $ must not swallow the next line
         j += 1;
       }
       if (j < text.length && text[j] === '$' && j - i <= 501 && !/\s/.test(text[j - 1]) && !/\d/.test(text[j + 1] ?? '') && text[j + 1] !== '$') {
@@ -187,6 +188,23 @@ export function splitMath(text) {
   }
   flush(text.length);
   return out;
+}
+
+/**
+ * A model sometimes forgets the closing $ of a formula ("(a) $\\ce{A + B ->}"). On a line with an odd number of
+ * unescaped $ whose last one opens a LaTeX command, close it at the end of the line. Prices ("$5") are left alone, and
+ * text with $$ blocks is not touched.
+ */
+export function balanceMath(input) {
+  const text = String(input ?? '');
+  if (!text.includes('$') || text.includes('$$')) return text;
+  return text.split('\n').map((line) => {
+    const marks = [...line.matchAll(/(?<!\\)\$/g)].map((m) => m.index);
+    if (marks.length % 2 === 0) return line;
+    const after = line.slice(marks.at(-1) + 1);
+    if (!after.trim() || /^\s/.test(after) || !/\\[a-zA-Z]+\s*[{(]|\\[a-zA-Z]{2,}/.test(after)) return line;
+    return `${line.trimEnd()}$`;
+  }).join('\n');
 }
 
 /** True when the text holds at least one $...$ formula. */

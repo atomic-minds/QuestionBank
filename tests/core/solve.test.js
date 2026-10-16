@@ -213,3 +213,16 @@ test('the number printed on the paper is removed from the question; part labels 
   const { system } = buildPrompt(buildTaxonomyIndex([], []), {});
   assert.match(system, /NUMBERING: never copy the question number/);
 });
+
+// ------------------------------------------------------------------ a forgotten closing $
+test('a stray $ no longer swallows the next line, and a forgotten closing $ is added', async () => {
+  const { splitMath, balanceMath } = await import('../../supabase/functions/_shared/core/chem.js');
+  const broken = '(a) $\\ce{2MnO4^-(aq) + 10I^-(aq) + 16H+(aq) ->}\n(b) $\\ce{Cr2O7^2-(aq) + 6Fe^2+(aq) ->}$';
+  const maths = splitMath(broken).filter((p) => p.math);
+  assert.equal(maths.length, 1, 'only line (b) is a formula; line (a) is not glued to it');
+  assert.ok(!maths[0].tex.includes('\n'));
+  assert.equal(balanceMath(broken), '(a) $\\ce{2MnO4^-(aq) + 10I^-(aq) + 16H+(aq) ->}$\n(b) $\\ce{Cr2O7^2-(aq) + 6Fe^2+(aq) ->}$');
+  assert.equal(splitMath(balanceMath(broken)).filter((p) => p.math).length, 2);
+  for (const keep of ['It costs $5 today', 'a $5 and $10 note', '$$x^2$$\n$y', 'price \\$5', 'no dollars here']) assert.equal(balanceMath(keep), keep, keep);
+  assert.equal(balanceMath('Find $\\frac{a}{b} now'), 'Find $\\frac{a}{b} now$');
+});
