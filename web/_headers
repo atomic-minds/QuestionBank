@@ -4,9 +4,9 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
 /js/*
-  Cache-Control: public, max-age=300
+  Cache-Control: no-cache
 /css/*
-  Cache-Control: public, max-age=300
+  Cache-Control: no-cache
 /sw.js
   Cache-Control: no-cache
 /manifest.webmanifest

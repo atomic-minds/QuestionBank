@@ -73,9 +73,7 @@ export function download(filename, text, mime = 'application/json') {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-export const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '');
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-export const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 /** Copy text; falls back for browsers that block the async clipboard. */
 export async function copyText(text) {

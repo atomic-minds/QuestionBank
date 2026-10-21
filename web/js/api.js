@@ -86,10 +86,6 @@ export async function getTaxonomy({ force = false } = {}) {
 }
 export const clearTaxonomyCache = () => { taxCache = null; };
 
-export async function getTypes() {
-  return need().select('question_types', { select: 'code,label,kind,sort_order', order: 'sort_order' });
-}
-
 /** @param {{q?,subject?,chapter?,topic?,type?,category?,exam?,year?,difficulty?,marks?,tag?,language?,status?,publicId?,limit?,offset?}} f */
 export async function search(f = {}) {
   const args = {

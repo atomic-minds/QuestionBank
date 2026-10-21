@@ -6,7 +6,6 @@ import { finalizeBatch, normalizeImportItem } from '../importer.js';
 import { AI_MAX_QUESTIONS, AI_QUESTION_KEYS } from './schema.js';
 import { AiError } from './provider.js';
 import { balanceMath, repairTex } from '../chem.js';
-import { QUESTION_TYPES } from '../constants.js';
 import { SOLVE_KEYS, SOLVE_MAX_ITEMS } from './schema.js';
 
 const ALLOWED_TOP = new Set(['questions', 'image_issues']);
@@ -143,5 +142,3 @@ export function adaptSolveOutput(json, asked, ctx) {
   });
   return { ok: true, solutions };
 }
-
-export const SOLVE_TYPES = new Set(Object.keys(QUESTION_TYPES));
