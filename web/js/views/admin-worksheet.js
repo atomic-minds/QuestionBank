@@ -54,6 +54,7 @@ export default async function worksheet(ctx, body) {
             <div class="field"><label for="w-sub">Subject</label><select id="w-sub" name="subject"><option value="">All subjects</option>${tax.tree.map((s) => html`<option value="${s.id}">${s.name}</option>`)}</select></div>
             <div class="field"><label for="w-chap">Chapter</label><select id="w-chap" name="chapter"><option value="">All chapters</option></select></div>
             <div class="field"><label for="w-type">Type</label><select id="w-type" name="type"><option value="">All types</option>${Object.entries(QUESTION_TYPES).map(([c, t]) => html`<option value="${c}">${t.label}</option>`)}</select></div>
+            <div class="field"><label for="w-lang">Language</label><select id="w-lang" name="language"><option value="">Any language</option><option value="bn">Bengali</option><option value="en">English</option></select></div>
             <div class="field"><label for="w-diff">Difficulty</label><select id="w-diff" name="difficulty"><option value="">Any</option>${DIFFICULTIES.map((d) => html`<option value="${d}">${d[0].toUpperCase()}${d.slice(1)}</option>`)}</select></div>
             <div class="field"><label for="w-q">Words</label><input id="w-q" type="search" name="q" placeholder="Optional search text"></div>
           </div>
@@ -109,7 +110,7 @@ export default async function worksheet(ctx, body) {
     e.preventDefault();
     const btn = body.querySelector('#w-load'); btn.disabled = true; listBox.innerHTML = '<p class="loading">Loading…</p>';
     try {
-      loaded = await api.fetchAll({ status: val('status') || undefined, subject: val('subject'), chapter: val('chapter'), type: val('type'), difficulty: val('difficulty'), q: val('q').trim() }, { max: 500 });
+      loaded = await api.fetchAll({ status: val('status') || undefined, subject: val('subject'), chapter: val('chapter'), type: val('type'), language: val('language'), difficulty: val('difficulty'), q: val('q').trim() }, { max: 500 });
       if (loaded.truncated) toast('More than 500 questions match. Only the first 500 are listed: narrow the filters.');
       sel.clear();
     } catch (err) { listBox.innerHTML = html`<div class="notice bad" role="alert">${err.message}</div>`.toString(); btn.disabled = false; return; }

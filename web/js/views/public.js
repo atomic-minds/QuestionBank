@@ -7,7 +7,7 @@ import { renderQuestion } from './question-view.js';
 import { bindFilterBar, filterBar } from './filterbar.js';
 
 const PAGE = 20;
-const FILTER_KEYS = ['q', 'type', 'category', 'exam', 'year', 'difficulty', 'marks', 'tag'];
+const FILTER_KEYS = ['q', 'type', 'language', 'category', 'exam', 'year', 'difficulty', 'marks', 'tag'];
 
 export const errorBox = (e) => html`<div class="notice bad" role="alert"><b>${e?.message ?? 'Something went wrong.'}</b>${e?.code === 'NOT_CONFIGURED' ? html`<p class="small">Open <code>web/config.js</code> and paste your Supabase URL and public key.</p>` : ''}</div>`;
 
@@ -54,6 +54,8 @@ function findBySlug(tree, { subject, chapter, topic }) {
   return { s, c, t };
 }
 
+const LANGUAGES = { bn: 'Bengali', en: 'English' };
+
 const hrefFor = (v) => {
   const { subject, chapter, topic, ...rest } = v;
   const path = subject ? `/browse/${subject}${chapter ? `/${chapter}` : ''}${chapter && topic ? `/${topic}` : ''}` : '/search';
@@ -68,6 +70,7 @@ function publicFields({ tree, facets, s, c }) {
     { key: 'chapter', label: 'Chapter', all: 'All chapters', opts: (s?.chapters ?? []).map((x) => ({ value: x.slug, label: x.name, count: x.count })), disabledHint: 'Pick a subject first' },
     { key: 'topic', label: 'Topic', all: 'All topics', opts: (c?.topics ?? []).map((x) => ({ value: x.slug, label: x.name, count: x.count })), disabledHint: 'Pick a chapter first' },
     { key: 'type', label: 'Question type', all: 'All types', opts: facets.types.map((t) => ({ value: t.code, label: t.label, count: t.count })) },
+    { key: 'language', label: 'Language', all: 'Any language', opts: (facets.languages ?? []).map((l) => ({ value: l.value, label: LANGUAGES[l.value] ?? l.value, count: l.count })) },
     { key: 'category', label: 'Kind', all: 'Any kind', more: true, opts: kinds },
     { key: 'exam', label: 'Exam', all: 'All exams', more: true, opts: facets.exams.map((e) => ({ value: String(e.id), label: e.name, count: e.count })) },
     { key: 'year', label: 'Year', all: 'Any year', more: true, opts: facets.years.map((y) => ({ value: String(y.value), label: String(y.value), count: y.count })) },
@@ -90,7 +93,7 @@ export async function browse(ctx, app) {
     const { s, c, t } = found;
     const scope = { subject: s?.id, chapter: c?.id, topic: t?.id };
     const hasFilter = Boolean(s) || FILTER_KEYS.some((k) => q[k]);
-    const filters = { ...scope, q: q.q, type: q.type, category: q.category, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag };
+    const filters = { ...scope, q: q.q, type: q.type, language: q.language, category: q.category, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag };
     // Nothing is listed until a filter is chosen, so the question search only runs when one is.
     const [result, facets, tx] = await Promise.all([
       hasFilter ? api.search({ ...filters, limit: PAGE, offset: (page - 1) * PAGE }) : Promise.resolve(null),
@@ -99,7 +102,7 @@ export async function browse(ctx, app) {
     ]);
     if (ctx.stale()) return;
 
-    const values = { subject: s?.slug, chapter: c?.slug, topic: t?.slug, q: q.q, type: q.type, category: q.category, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag };
+    const values = { subject: s?.slug, chapter: c?.slug, topic: t?.slug, q: q.q, type: q.type, language: q.language, category: q.category, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag };
     const base = hrefFor({ subject: s?.slug, chapter: c?.slug, topic: t?.slug });
     const heading = t?.name ?? c?.name ?? s?.name ?? (q.q ? `Results for “${q.q}”` : 'Find questions');
     const pageHref = (p) => withQuery(base, { ...q, page: p > 1 ? p : null });

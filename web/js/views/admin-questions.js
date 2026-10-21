@@ -26,7 +26,7 @@ async function setStatus(list, status) {
   return { saved: out.results.length - failed.length, failed: failed.map((r, i) => r.message ?? r.errors?.[0]?.message ?? 'could not be saved') };
 }
 
-const FILTER_KEYS = ['q', 'status', 'subject', 'chapter', 'topic', 'type', 'exam', 'year', 'difficulty', 'marks', 'tag'];
+const FILTER_KEYS = ['q', 'status', 'subject', 'chapter', 'topic', 'type', 'language', 'exam', 'year', 'difficulty', 'marks', 'tag'];
 
 /** The strong "are you sure" for deleting. Typing DELETE is required for several questions or any published one. */
 export function confirmDelete(items) {
@@ -55,7 +55,7 @@ export default async function list(ctx, body) {
   const subject = tax.tree.find((s) => String(s.id) === q.subject);
   const chapter = subject?.chapters.find((c) => String(c.id) === q.chapter);
   const hasFilter = FILTER_KEYS.some((k) => q[k]);
-  const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, limit: PAGE, offset: (page - 1) * PAGE }) : null;
+  const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, language: q.language, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, limit: PAGE, offset: (page - 1) * PAGE }) : null;
   if (ctx.stale()) return;
   // Which of these were answered by AI and not yet checked (admin only; the public never sees this).
   let flags = {};
@@ -68,6 +68,7 @@ export default async function list(ctx, body) {
     { key: 'chapter', label: 'Chapter', all: 'All chapters', opts: (subject?.chapters ?? []).map((c) => ({ value: String(c.id), label: c.name })), disabledHint: 'Pick a subject first' },
     { key: 'topic', label: 'Topic', all: 'All topics', opts: (chapter?.topics ?? []).map((t) => ({ value: String(t.id), label: t.name })), disabledHint: 'Pick a chapter first' },
     { key: 'type', label: 'Question type', all: 'All types', opts: Object.entries(QUESTION_TYPES).map(([c, t]) => ({ value: c, label: t.label })) },
+    { key: 'language', label: 'Language', all: 'Any language', opts: [{ value: 'bn', label: 'Bengali' }, { value: 'en', label: 'English' }] },
     { key: 'exam', label: 'Exam', all: 'All exams', more: true, opts: tax.exams.map((e) => ({ value: String(e.id), label: e.name })), disabledHint: 'No exams yet' },
     { key: 'year', label: 'Year', all: 'Any year', more: true, opts: Array.from({ length: thisYear + 1 - 1989 }, (_, i) => String(thisYear + 1 - i)).map((y) => ({ value: y, label: y })) },
     { key: 'difficulty', label: 'Difficulty', all: 'Any difficulty', more: true, opts: ['easy', 'medium', 'hard'].map((d) => ({ value: d, label: d[0].toUpperCase() + d.slice(1) })) },
