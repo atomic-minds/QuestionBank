@@ -290,3 +290,18 @@ test('restore mode allows bigger files than a normal paste, with its own limits'
   assert.match(tooMany.fatal?.message ?? '', new RegExp(`limit is ${LIM.restoreItemsMax}`));
   assert.match(tooMany.fatal.message, /one backup per subject/);
 });
+
+test('parseJsonLoose repairs raw line breaks and single backslashes that chat AIs leave in texts', () => {
+  const raw = '{"questions":[{"question":"Line one\nLine two\twith tab","answer":"\\ce{H2O} and \\alpha and \\(x\\)"}]}';
+  const r = parseJsonLoose(raw);
+  assert.equal(r.ok, true);
+  assert.equal(r.value.questions[0].question, 'Line one\nLine two\twith tab');
+  assert.equal(r.value.questions[0].answer, '\\ce{H2O} and \\alpha and \\(x\\)');
+  assert.ok(r.notes.some((n) => /backslashes/.test(n)));
+  // valid JSON is untouched and gets no note
+  const ok = parseJsonLoose('{"a":"x\\ny \\u0041"}');
+  assert.deepEqual(ok.value, { a: 'x\ny A' });
+  assert.deepEqual(ok.notes, []);
+  // still reports a real syntax error
+  assert.equal(parseJsonLoose('{"a": "x" "b"}').ok, false);
+});

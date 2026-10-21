@@ -270,8 +270,3 @@ function validateMatch(input, value, err) {
   if (bad) err('answer', 'Match every item in List I to an item in List II.');
   else value.answer = { pairs: out };
 }
-
-/** Fast structural gate used before spending a database round trip. */
-export function summarizeErrors(errors) {
-  return errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message)).join('; ');
-}

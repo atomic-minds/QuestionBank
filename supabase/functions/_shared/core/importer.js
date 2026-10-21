@@ -44,6 +44,33 @@ function stripTrailingCommas(s) {
   return out;
 }
 
+/**
+ * Inside JSON strings only: a raw line break or tab becomes \n / \t, and a backslash that starts no valid JSON escape
+ * (\ce, \alpha, \(, \_ ...) is doubled so it survives as a literal backslash. Chat AIs often forget to double backslashes.
+ * Returns the text unchanged when nothing needed fixing.
+ */
+function repairJsonStrings(s) {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (!inStr) { if (ch === '"') inStr = true; out += ch; continue; }
+    if (ch === '"') { inStr = false; out += ch; continue; }
+    if (ch === '\\') {
+      const nx = s[i + 1];
+      if (nx !== undefined && ('"\\/bfnrt'.includes(nx) || (nx === 'u' && /^[0-9a-fA-F]{4}$/.test(s.slice(i + 2, i + 6))))) { out += ch + nx; i += 1; }
+      else out += '\\\\';
+      continue;
+    }
+    if (ch === '\n') out += '\\n';
+    else if (ch === '\r') out += s[i + 1] === '\n' ? '' : '\\n';
+    else if (ch === '\t') out += '\\t';
+    else if (ch < ' ') out += `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+    else out += ch;
+  }
+  return out;
+}
+
 function locate(text, error) {
   const msg = String(error?.message ?? error);
   let line = null;
@@ -116,6 +143,13 @@ export function parseJsonLoose(input) {
   if (noCommas !== s) {
     s = noCommas;
     notes.push('Removed trailing commas.');
+    const r = attempt();
+    if (r) return r;
+  }
+  const mended = repairJsonStrings(s);
+  if (mended !== s) {
+    s = stripTrailingCommas(mended);
+    notes.push('Fixed line breaks and backslashes inside the texts (the AI forgot to escape them).');
     const r = attempt();
     if (r) return r;
   }

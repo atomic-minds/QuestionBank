@@ -1,7 +1,7 @@
 // The only shape the AI is allowed to answer in. It is sent as a response schema (so the model is
 // constrained while generating) AND re-checked in adapt.js (so a misbehaving model cannot get
 // anything through). Uses the OpenAPI-style subset Gemini supports (uppercase type names).
-import { LIMITS, TYPE_CODES } from '../constants.js';
+import { TYPE_CODES } from '../constants.js';
 
 export const AI_MAX_QUESTIONS = 10;
 
@@ -63,8 +63,6 @@ export function buildResponseSchema() {
     required: ['questions'],
   };
 }
-
-export const AI_LIMITS = Object.freeze({ maxQuestions: AI_MAX_QUESTIONS, questionChars: LIMITS.questionText });
 
 // ---- "Solve with AI": text in, answers out -------------------------------------------------------------------
 export const SOLVE_MAX_ITEMS = 5;
