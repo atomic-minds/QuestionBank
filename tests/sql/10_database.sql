@@ -558,5 +558,37 @@ reset role;
 select test.ok(not exists (select 1 from public.question_ai_check where question_id = :'id_aic'::uuid), 'ai-check: deleted with its question');
 :as_admin
 
+-- ---- Language filter (Bengali / English): worked out by the database from the question text -------------------
+select (test.save('{"question_text":"কোনো গ্যাসের আয়তন ও চাপের সম্পর্ক কী? Write Boyle (PV = k)", "status":"published"}'))->>'id' as id_bn \gset
+select (test.save('{"question_text":"A purely English question about gases in the language test?", "status":"published"}'))->>'id' as id_en \gset
+select (test.save('{"question_text":"English stem with a Bengali passage", "context":"নিচের অনুচ্ছেদটি পড়ো", "status":"published"}'))->>'id' as id_ctx \gset
+select (test.save('{"question_text":"Draft Bengali question: তড়িৎ বিশ্লেষণ কাকে বলে?", "status":"draft"}'))->>'id' as id_bn_draft \gset
+select test.ok((select language from public.questions where id = :'id_bn'::uuid) = 'bn', 'language: Bengali letters make a question Bengali');
+select test.ok((select language from public.questions where id = :'id_en'::uuid) = 'en', 'language: no Bengali letters means English');
+select test.ok((select language from public.questions where id = :'id_ctx'::uuid) = 'bn', 'language: a Bengali passage counts too');
+select test.ok((select language from public.questions where id = :'id_bn'::uuid) = 'bn'
+           and (select count(*) from public.questions where language is null) = 0, 'language: every question has one');
+select public_id as pid_lbn from public.questions where id = :'id_bn'::uuid \gset
+select public_id as pid_len from public.questions where id = :'id_en'::uuid \gset
+select public_id as pid_lctx from public.questions where id = :'id_ctx'::uuid \gset
+select public_id as pid_lbn_draft from public.questions where id = :'id_bn_draft'::uuid \gset
+update public.questions set question_text = 'Now this one is plain English again, no other script' where id = :'id_bn'::uuid;
+select test.ok((select language from public.questions where id = :'id_bn'::uuid) = 'en', 'language: follows the text when it is edited');
+update public.questions set question_text = 'কোনো গ্যাসের আয়তন ও চাপের সম্পর্ক কী? Write Boyle (PV = k)' where id = :'id_bn'::uuid;
+:as_anon
+select test.ok(test.pids(public.qb_search_questions(p_language := 'bn')) like '%' || :'pid_lbn' || '%'
+           and test.pids(public.qb_search_questions(p_language := 'bn')) like '%' || :'pid_lctx' || '%', 'filter: language Bengali finds the Bengali questions');
+select test.ok(test.pids(public.qb_search_questions(p_language := 'bn')) not like '%' || :'pid_len' || '%', 'filter: language Bengali leaves English ones out');
+select test.ok(test.pids(public.qb_search_questions(p_language := 'en')) like '%' || :'pid_len' || '%'
+           and test.pids(public.qb_search_questions(p_language := 'en')) not like '%' || :'pid_lbn' || '%', 'filter: language English finds English only');
+select test.ok(test.pids(public.qb_search_questions(p_language := 'bn')) not like '%' || :'pid_lbn_draft' || '%', 'filter: the public never sees a draft Bengali question');
+select test.ok(test.pids(public.qb_search_questions(p_language := 'bn', p_type := 'short_answer')) = '', 'filter: language combines with other filters (AND)');
+select test.throws($$select public.qb_search_questions(p_language := 'fr')$$, 'QB_VALIDATION', 'filter: an unknown language is refused');
+select test.ok((public.qb_facets() -> 'languages') @> '[{"value":"bn","count":2}]'::jsonb and (public.qb_facets() -> 'languages' -> 0 ->> 'value') = 'bn'
+           and (select sum((x ->> 'count')::int) from jsonb_array_elements(public.qb_facets() -> 'languages') x) = (public.qb_facets() ->> 'total')::int, 'facets: language counts add up to the total, Bengali first');
+:as_admin
+select test.ok(test.pids(public.qb_search_questions(p_language := 'bn', p_status := 'draft')) like '%' || :'pid_lbn_draft' || '%', 'filter: an admin finds Bengali drafts');
+delete from public.questions where id in (:'id_bn'::uuid, :'id_en'::uuid, :'id_ctx'::uuid, :'id_bn_draft'::uuid);
+
 -- Marker proving the whole file ran to the end (the harness requires it).
 select test.ok(true, 'END OF 10_database');
