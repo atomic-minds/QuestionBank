@@ -128,7 +128,9 @@ test('text answers: required; fill-blank accepts a list', () => {
   const fb = one({ type: 'fill in the blanks', question: '____ is ionic and ____ is covalent.', answer: ['NaCl', 'HCl'], subject: 'Chemistry', chapter: 'Solid State' });
   assert.deepEqual(fb.draft.answer, { text: 'NaCl; HCl' });
   assert.ok(fb.warnings.some((w) => w.path === 'answer'));
-  assert.ok(paths(one({ ...sa, answer: 'x', options: ['a', 'b'] })).includes('options'));
+  const withOptions = one({ ...sa, answer: 'x', options: ['a', 'b'] });   // printed options make it multiple choice; 'x' is not one of them
+  assert.equal(withOptions.draft.type_code, 'mcq');
+  assert.ok(paths(withOptions).includes('answer'));
 });
 
 test('numerical answers: numbers, strings with units, scientific notation, objects', () => {

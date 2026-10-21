@@ -994,6 +994,28 @@ def main():
             check('the Bengali question paper is built with Bengali text and an answer key', 'বয়েলের সূত্রটি' in page.inner_text('.sheet-q') and page.locator('.sheet-key li').count() == 2)
             ctl(sql="delete from public.questions where question_text like '%(e2e bangla%'")
 
+            # ------------------------------------------------------------ a calculation that prints options is multiple choice (tagged "numerical")
+            go('/admin/add?tab=json')
+            page.fill('#json', json.dumps({"questions": [{"type": "numerical", "question": "If 0.40 g of a solute lowers the freezing point of 10 g benzene by 2 K, the molar mass is (e2e printed options)",
+                "options": ["0.10 g/mol", "100 g/mol", "7.3 g/mol", "130 g/mol"], "answer": "100 g/mol", "subject": "Chemistry", "chapter": "Some Basic Concepts of Chemistry"}]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('.item-list')
+            check('a numerical question with printed options becomes MCQ and is ready, not "needs fixing"', page.locator('.item .q-type', has_text='MCQ').count() == 1 and page.locator('.item.bad').count() == 0 and page.locator('.badge.review', has_text='Ready').count() == 1)
+            check('the review says why it was changed', 'made a multiple-choice question' in page.inner_text('.item-list'), page.inner_text('.item-list')[:300])
+            page.select_option('#st', 'draft'); page.click('[data-act=save]')
+            until(lambda: '/admin/questions' in page.url, 20, 'printed-options saved')
+            check('saved as MCQ with the right option marked and the numerical tag', ctl(sql="select type_code || ':' || (answer->>'value') || ':' || ('numerical' = any(tags))::text from public.questions where question_text like '%(e2e printed options)%'")['out'].strip().endswith('mcq:B:true'))
+            ctl(sql="delete from public.questions where question_text like '%(e2e printed options)%'")
+
+            # ------------------------------------------------------------ export label and "instructions for another AI"
+            go('/admin/export')
+            labels = [t.strip() for t in page.locator('input[name=fmt] ~ *, input[name=fmt] + span, label:has(input[name=fmt])').all_inner_texts()]
+            check('export screen says plain JSON and has no "Atomic Minds" label', 'Atomic Minds' not in text() and any(l.startswith('JSON') for l in labels), str(labels)[:200])
+            go('/admin/add?tab=json')
+            page.locator('summary', has_text='Format help').click()
+            check('JSON tab explains how to use another AI, step by step', page.locator('ol li', has_text='attach your photo').count() == 1 and page.locator('#cp-ai').count() == 1 and 'continue' in text())
+            ai_text = page.evaluate("""async () => { const m = await import('/js/views/ai-instructions.js'); const t = await import('/js/api.js'); const tax = await t.getTaxonomy(); return m.buildExternalInstructions(tax); }""")
+            check('the copied instructions name this bank\'s own chapters and the answer rules', 'Some Basic Concepts of Chemistry' in ai_text and 'option LETTER only' in ai_text and 'JSON object ONLY' in ai_text, ai_text[:120])
+
             # ------------------------------------------------------------ session handling
             go('/admin')
             page.evaluate("(() => { const s = JSON.parse(localStorage.getItem('qb.session')); s.expires_at = 1; localStorage.setItem('qb.session', JSON.stringify(s)); })()")

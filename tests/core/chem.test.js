@@ -35,3 +35,13 @@ test('drawn structures are recognised', () => {
   assert.equal(isStructureText('a normal question\nsecond line'), false);
   assert.equal(isStructureText('single line'), false);
 });
+
+test('repairTex also fixes a formula that STARTS with the damaged command ($\\frac, $\\beta, $\\neq ...)', async () => {
+  const { repairTex } = await import('../../supabase/functions/_shared/core/chem.js');
+  assert.equal(repairTex('and $\u000crac{1}{2}$'), 'and $\\frac{1}{2}$');
+  assert.equal(repairTex('$\u0008eta$ and $$\u000crac{a}{b}$$'), '$\\beta$ and $$\\frac{a}{b}$$');
+  assert.equal(repairTex('$\u0009imes 4$'), '$\\times 4$');
+  assert.equal(repairTex('$\neq 5$ and $\nu$'), '$\\neq 5$ and $\\nu$');
+  assert.equal(repairTex('It costs $5 and $10'), 'It costs $5 and $10', 'prices are untouched');
+  assert.equal(repairTex('$x$\nnext line'), '$x$\nnext line', 'a real line break is kept');
+});

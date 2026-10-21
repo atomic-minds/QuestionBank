@@ -219,7 +219,7 @@ Optional hardening: once the site works, set the secret `ALLOWED_ORIGINS` to you
 3. **Add questions → Paste JSON**: open "Format help, example…", click **Copy example**, paste it into the box and press **Check and preview**. You will land on **Review drafts**. Choose *Save as: Draft* and click **Save**.
 4. **Add questions → From an image** (if you did Step 3): choose a clear photo of one or two questions, add a subject if you know it, press **Read the questions**. Check every answer. Answers the AI had to work out are marked, and you must fill any missing answer yourself.
 5. **All questions → Publish** the ones you have checked. Open the public site: they appear under their subject and chapter, with a **Show answer** button.
-6. **Export & backup**: try *Plain text* and *Atomic Minds JSON* to see the files.
+6. **Export & backup**: try *Plain text* and *JSON* to see the files.
 
 Only **published** questions are visible to the public.
 

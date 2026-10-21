@@ -2,7 +2,7 @@
   "name": "question-bank",
   "private": true,
   "version": "1.0.0",
-  "description": "Free-tier Question Bank with AI image import and Atomic Minds export. Zero runtime dependencies.",
+  "description": "Free-tier Question Bank with AI image import and JSON export. Zero runtime dependencies.",
   "type": "module",
   "engines": {
     "node": ">=22"

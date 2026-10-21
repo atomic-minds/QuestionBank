@@ -79,7 +79,7 @@ test('plain text: numbering, options to hide things, other types', () => {
 });
 
 test('filenames sort by date', () => {
-  assert.equal(exportFilename('json', NOW), 'atomic-minds-questions-2026-10-06.json');
+  assert.equal(exportFilename('json', NOW), 'question-bank-questions-2026-10-06.json');
   assert.equal(exportFilename('text', NOW), 'question-bank-2026-10-06.txt');
   assert.equal(exportFilename('backup', NOW), 'question-bank-backup-2026-10-06.json');
 });

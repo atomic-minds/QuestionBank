@@ -1,12 +1,12 @@
-# Export formats and how Atomic Minds uses them
+# Export formats and how other systems use them
 
 The Question Bank is the **master**. Other systems (Atomic Minds TMS, a printout, another bank) receive **copies**. Every export carries the question's permanent Question Bank ID (`QB-CHEM-000123`), so a question can always be traced back and re-synchronised.
 
 Three exports exist, all under **Admin → Export & backup**. Each can export *everything that matches the filters* (status, subject, chapter, type, general/exam, exam, year, difficulty, tag) or *only the questions you tick*.
 
-## 1. Atomic Minds JSON (`atomic-minds-question-bank`, version 1)
+## 1. JSON (format id `atomic-minds-question-bank`, version 1)
 
-File name: `atomic-minds-questions-YYYY-MM-DD.json`.
+File name: `question-bank-questions-YYYY-MM-DD.json`. (The `format` id inside the file keeps its original value on purpose, so files exported earlier and systems that already read it keep working.)
 
 ```json
 {
