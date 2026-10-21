@@ -8,6 +8,7 @@ import { AI_MAX_QUESTIONS } from '../core/ai/schema.js';
 import { setTitle } from './public.js';
 import { photoStore, setDrafts } from './drafts.js';
 import { prepareImage } from './image-tools.js';
+import { buildExternalInstructions } from './ai-instructions.js';
 
 const TABS = [['image', 'From an image'], ['json', 'Paste JSON'], ['manual', 'Write one']];
 
@@ -21,27 +22,6 @@ function exampleJson(tax) {
       { type: 'short_answer', question: 'Define a unit cell.', answer: 'The smallest repeating unit of a crystal lattice.', subject: s?.name ?? 'Chemistry', chapter: c?.name ?? 'Solid State' },
     ],
   }, null, 2);
-}
-
-function aiInstructions(tax) {
-  const list = tax.tree.map((s) => `- ${s.name}: ${s.chapters.map((c) => c.name).join('; ')}`).join('\n');
-  return `Read the attached image and return ONLY a JSON object, no commentary, in this exact shape:
-
-{"format":"qb-import","version":1,"questions":[{
-  "type": "mcq | true_false | assertion_reason | numerical | short_answer | long_answer | fill_blank | case_based | match_following",
-  "question": "question text",
-  "context": "passage, for case_based only, else null",
-  "options": ["option text without A./B. labels"],
-  "answer": "the option letter (B) for choice types; the answer text otherwise; for match_following use \\"A-2, B-1\\"",
-  "explanation": "explanation or null",
-  "subject": "...", "chapter": "...", "topic": "... or null",
-  "difficulty": "easy | medium | hard or null", "marks": number or null, "tags": [],
-  "exams": [{"exam": "name", "year": 2025}]
-}]}
-
-For match_following use "match": {"left": [...], "right": [...]} instead of options.
-Do not invent questions. Use only these subject and chapter names:
-${list}`;
 }
 
 export default async function add(ctx, body) {
@@ -201,7 +181,14 @@ function jsonTab(host, tax) {
     <details><summary>Format help, example and instructions for another AI</summary><div class="stack mt">
       <p>Each question needs a type, the question text, an answer, and a subject and chapter that exist under Taxonomy. Names are matched ignoring case and punctuation. Nothing is saved until you review it.</p>
       <pre class="panel small scroll-x"><code id="ex">${example}</code></pre>
-      <div class="row"><button type="button" class="btn-sm" id="cp-ex">Copy example</button><button type="button" class="btn-sm" id="cp-ai">Copy instructions for another AI</button></div></div></details>
+      <div class="row"><button type="button" class="btn-sm" id="cp-ex">Copy example</button></div>
+      <h3>Use another AI (ChatGPT, Gemini, Claude...)</h3>
+      <ol class="small"><li>Press <b>Copy instructions for another AI</b>.</li>
+        <li>In the other AI, attach your photo of the questions and paste the instructions as your message.</li>
+        <li>Copy the JSON it replies with and paste it in the box above. If the photo has more than 30 questions, write <b>continue</b> and paste each new reply separately.</li>
+        <li>Press <b>Check and preview</b>, read every question and answer, then save.</li></ol>
+      <p class="hint">The instructions contain your own subject, chapter, topic and exam names, so copy them again after you change the Taxonomy.</p>
+      <div class="row"><button type="button" class="btn-sm btn-primary" id="cp-ai">Copy instructions for another AI</button></div></div></details>
   </form>`.toString();
 
   const sub = host.querySelector('#d-s');
@@ -215,7 +202,7 @@ function jsonTab(host, tax) {
     if (f) host.querySelector('#json').value = await f.text();
   });
   host.querySelector('#cp-ex').addEventListener('click', async () => toast((await copyText(example)) ? 'Example copied' : 'Could not copy', 'ok'));
-  host.querySelector('#cp-ai').addEventListener('click', async () => toast((await copyText(aiInstructions(tax))) ? 'Instructions copied. Paste them into the other AI along with your image.' : 'Could not copy', 'ok'));
+  host.querySelector('#cp-ai').addEventListener('click', async () => toast((await copyText(buildExternalInstructions(tax))) ? 'Instructions copied. Paste them into the other AI together with your photo.' : 'Could not copy', 'ok'));
 
   host.querySelector('#jf').addEventListener('submit', (e) => {
     e.preventDefault();

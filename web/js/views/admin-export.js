@@ -1,4 +1,4 @@
-// Export & backup: Atomic Minds JSON, readable plain text, and a full backup that can be restored.
+// Export & backup: JSON, readable plain text, and a full backup that can be restored.
 // Everything is built in the browser from pages of 500 questions, so nothing large is held on a server.
 import { html, on, toast, download, confirmDialog } from '../dom.js';
 import { navigate } from '../router.js';
@@ -10,7 +10,7 @@ import { setDrafts } from './drafts.js';
 import { setTitle } from './public.js';
 
 const FORMATS = [
-  ['am', 'Atomic Minds JSON', 'The versioned file Atomic Minds imports. Keeps each QB ID so questions stay traceable.'],
+  ['am', 'JSON', 'A versioned JSON file of your questions. Keeps each question ID so they stay traceable.'],
   ['text', 'Plain text', 'Readable and easy to paste: Q1, options A–D, Ans, Exp.'],
   ['backup', 'Full backup', 'Everything (all statuses, IDs, taxonomy) so this bank can be restored later or moved. Pictures are not inside it: take a Pictures backup too.'],
   ['pictures', 'Pictures backup', 'Only the pictures of the chosen questions, in one file (can be large). Restore it after restoring a Full backup.'],

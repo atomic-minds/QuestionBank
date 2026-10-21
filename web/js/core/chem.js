@@ -146,6 +146,11 @@ const EXPLICIT = /\^\{([^{}]{1,24})\}|_\{([^{}]{1,24})\}|\^((?:[+\-−]\d{1,3})|
 const ARROWS = { '<=>': '⇌', '<->': '↔', '-->': '⟶', '->': '→' };
 
 const BAD_NU = /\n(?=(?:eq|u|e|i|abla|ot|otin|eg|less|geq|leq|ewline)(?![A-Za-z]))/g;
+// A formula that STARTS with the damaged command, e.g. "$\frac{1}{2}$" read as "$" + form feed + "rac...". A control
+// character right after an opening dollar is never meant, and it would stop the formula being recognised at all.
+const LEAD_CTRL = /(\$\$?)([\u0008\u000c\t\r])/g;
+const LEAD_NU = new RegExp(`(\\$\\$?)${BAD_NU.source}`, 'g');
+const CTRL_BACK = { '\u0008': '\\b', '\u000c': '\\f', '\t': '\\t', '\r': '\\r' };
 
 /**
  * Find $...$ and $$...$$ stretches. Returns pieces in order:
@@ -215,9 +220,10 @@ export const hasMath = (text) => String(text ?? '').includes('$') && splitMath(S
  * control characters. Inside $...$ only, turn those back into the LaTeX command they were meant to be.
  */
 export function repairTex(input) {
-  const text = String(input ?? '');
+  let text = String(input ?? '');
   if (!text.includes('$') && !/[\u0008\u000c]/.test(text)) return text;
   if (!/[\u0008\u000c\t\r\n]/.test(text)) return text;
+  text = text.replace(LEAD_CTRL, (_, d, c) => d + CTRL_BACK[c]).replace(LEAD_NU, (_, d) => `${d}\\n`);
   const fix = (m) => m.replace(/\u0008/g, '\\b').replace(/\u000c/g, '\\f').replace(/\t/g, '\\t').replace(/\r/g, '\\r').replace(BAD_NU, '\\n');
   return splitMath(text).map((p) => (p.math ? `${p.display ? '$$' : '$'}${fix(p.inner)}${p.display ? '$$' : '$'}` : p.s)).join('');
 }

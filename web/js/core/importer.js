@@ -11,6 +11,7 @@ import {
   cleanText, isInt, isPlainObject, leadingLabels, matchKey, normalizeTags, parseOptionLetter, resolveDifficulty,
   resolveTypeCode, stripOptionLabels,
 } from './text.js';
+import { balanceMath, repairTex } from './chem.js';
 import { resolveClassification, resolveExamRef } from './taxonomy.js';
 import { validateQuestionInput } from './validate.js';
 
@@ -173,6 +174,22 @@ const ROMAN = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9,
 const ROMAN_LABEL = /^\s*\(?(i{1,3}|iv|vi{0,3}|ix|x)[.)]\s+/i;
 
 const pick = (...vals) => vals.find((v) => v !== undefined);
+
+// Text fields that may hold $...$ formulas. An AI that writes JSON often loses a backslash (\times becomes a tab,
+// \frac a form feed) or forgets a closing $. Fix that the same way the photo reader does. Backups are left exactly as they are.
+const TEXT_KEYS = ['question', 'question_text', 'text', 'statement', 'context', 'passage', 'case', 'options', 'choices', 'answer',
+  'correct_answer', 'correct', 'explanation', 'solution', 'rationale', 'match', 'match_items', 'left', 'right'];
+const fixDeep = (v) => {
+  if (typeof v === 'string') return balanceMath(repairTex(v));
+  if (Array.isArray(v)) return v.map(fixDeep);
+  if (isPlainObject(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fixDeep(x)]));
+  return v;
+};
+const repairMathText = (raw) => {
+  const out = { ...raw };
+  for (const k of TEXT_KEYS) if (k in out) out[k] = fixDeep(out[k]);
+  return out;
+};
 const blank = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
 const asName = (v) => (isPlainObject(v) ? (v.name ?? v.title ?? null) : v);
 
@@ -250,6 +267,26 @@ function parseNumberWithUnit(s) {
   if (!m) return null;
   const number = Number(m[1]);
   return Number.isFinite(number) ? { number, unit: m[2].trim() || null } : null;
+}
+
+/** "$100\\ \\text{g/mol}$" -> "100 g/mol" (enough to compare a numeric option with a numeric answer). */
+const plainValue = (t) => String(t ?? '').replace(/\$/g, '').replace(/\\(?:text|mathrm|textrm)\{([^}]*)\}/g, '$1').replace(/\\[,;:! ]|~/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * A question that was called "numerical" but prints options is really multiple choice. Its answer is a value
+ * ("100 g/mol", 100, {number:100, unit:"g/mol"}); find the one option that holds that value and return its letter.
+ * Returns the original answer when nothing matches exactly once (a letter, or text, is then handled as usual).
+ */
+function optionHoldingValue(rawAnswer, options) {
+  if (typeof rawAnswer === 'string' && parseOptionLetter(rawAnswer.trim())) return rawAnswer;
+  const want = resolveNumericAnswer(isPlainObject(rawAnswer) ? { unit: rawAnswer.unit, number: pick(rawAnswer.number, rawAnswer.value, rawAnswer.answer, rawAnswer.text) } : rawAnswer);
+  if (!want) return rawAnswer;
+  const sameUnit = (a, b) => !a || !b || matchKey(a) === matchKey(b);
+  const hits = options.filter((o) => {
+    const p = parseNumberWithUnit(plainValue(o.text));
+    return p && Math.abs(p.number - want.number) <= 1e-9 * Math.max(1, Math.abs(want.number)) && sameUnit(p.unit, want.unit);
+  });
+  return hits.length === 1 ? hits[0].id : rawAnswer;
 }
 
 function resolveNumericAnswer(a) {
@@ -349,6 +386,7 @@ export function normalizeImportItem(raw, index, ctx) {
   const fail = (message) => ({ index, ok: false, draft: null, errors: [{ path: '', message }], warnings, unresolved });
 
   if (!isPlainObject(raw)) return fail('Each question must be a JSON object.');
+  if (!ctx.restore) raw = repairMathText(raw);
 
   for (const key of Object.keys(raw)) {
     if (KNOWN_KEYS.has(key) || IGNORED_KEYS.has(key)) continue;
@@ -374,13 +412,20 @@ export function normalizeImportItem(raw, index, ctx) {
     else if (Array.isArray(rawOptions) && rawOptions.length >= 2) { typeCode = 'mcq'; warn('type_code', 'Type was missing; "mcq" was inferred from the options.'); }
     else err('type_code', 'The question type is missing (for example "mcq", "short_answer").');
   }
-  const typeDef = typeCode ? QUESTION_TYPES[typeCode] : null;
+  let typeDef = typeCode ? QUESTION_TYPES[typeCode] : null;
+  // A "numerical" (or short / long / fill-in) question that prints 2 or more options is multiple choice:
+  // the type is how the student answers, and here the student picks. A calculation keeps its nature as a tag.
+  let madeChoice = null;
+  if (typeDef && !ctx.restore && (typeDef.kind === 'numeric' || typeDef.kind === 'text') && Array.isArray(rawOptions) && rawOptions.filter((o) => !blank(isPlainObject(o) ? pick(o.text, o.label, o.value) : o)).length >= 2) {
+    madeChoice = typeCode; typeCode = 'mcq'; typeDef = QUESTION_TYPES.mcq;
+    warn('type_code', `This question prints its options, so it was made a multiple-choice question${madeChoice === 'numerical' ? ' and tagged "numerical"' : ''}. Check the answer.`);
+  }
 
   // ---- text ----------------------------------------------------------------------------------------
   const context = cleanText(pick(raw.context, raw.passage, raw.case, qObj ? q.context : undefined));
 
   // ---- options / match lists / answer --------------------------------------------------------------
-  const rawAnswer = pick(raw.answer, raw.correct_answer, raw.correct, undefined);
+  let rawAnswer = pick(raw.answer, raw.correct_answer, raw.correct, undefined);
   let options = null;
   let match_items = null;
   let answer = null;
@@ -397,6 +442,7 @@ export function normalizeImportItem(raw, index, ctx) {
     if (list) {
       const built = buildOptions(list, err, !ctx.restore);
       options = built.options;
+      if (madeChoice === 'numerical') rawAnswer = optionHoldingValue(rawAnswer, options);
       const r = resolveChoiceAnswer(rawAnswer, typeCode, options, built.idMap, ctx);
       if (r.error) err('answer', r.error);
       else { answer = { value: r.id }; if (r.warning) warn('answer', r.warning); }
@@ -519,6 +565,7 @@ export function normalizeImportItem(raw, index, ctx) {
     if (difficulty === undefined) { difficulty = null; warn('difficulty', `Difficulty "${String(rawDiff).slice(0, 30)}" is not easy, medium or hard; it was left blank.`); }
   }
   let tags = normalizeTags(pick(raw.tags, meta.tags, []));
+  if (madeChoice === 'numerical' && !tags.includes('numerical')) tags = [...tags, 'numerical'];
   if (tags.length > LIMITS.maxTags) { warn('tags', `Only the first ${LIMITS.maxTags} tags were kept.`); tags = tags.slice(0, LIMITS.maxTags); }
   const marksRaw = pick(raw.marks, meta.marks, raw.points);
 
