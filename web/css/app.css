@@ -471,7 +471,7 @@ label.inline { display: inline; margin: 0 .25rem; }
   main, .container { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .sheet { border: 0; border-radius: 0; padding: 0; }
   a { color: inherit; text-decoration: none; }
-  @page { margin: 14mm; }
+  @page { margin: 14mm 14mm 16mm; @bottom-center { content: counter(page); font: 9pt sans-serif; color: #555; } }
 }
 
 /* ---- filter bar (public pages and the admin list) ---- */

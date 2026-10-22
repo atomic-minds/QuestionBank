@@ -78,6 +78,7 @@ async function dashboard(ctx, body) {
       <div class="stat"><b>${by.published ?? 0}</b><a href="/admin/questions?status=published">published</a></div>
       <div class="stat"><b>${(by.draft ?? 0) + (by.review ?? 0)}</b><a href="/admin/questions?status=draft">waiting for review</a> <span class="muted small">(${by.draft ?? 0} draft, ${by.review ?? 0} in review)</span></div>
       <div class="stat"><b>${by.archived ?? 0}</b><a href="/admin/questions?status=archived">archived</a></div>
+      <div class="stat"><b>${stats.ai_unchecked ?? 0}</b>${(stats.ai_unchecked ?? 0) > 0 ? html`<a href="/admin/questions?check=1">answers to check</a>` : 'answers to check'}<div class="hint">Answers an AI wrote that you have not marked as checked.</div></div>
     </div>
     <div class="stats">
       <div class="stat"><b>${stats.ai_used_today}</b>AI image reads today<div class="hint">The count restarts at 12:00 am India time. Reads that Google rejects or fails are not counted. Your daily cap is set by the AI_DAILY_LIMIT secret. Google has its own free limit, which resets at about 12:30 pm IST.</div></div>

@@ -7,6 +7,7 @@ import { emptyQuestionInput } from '../core/validate.js';
 import { setTitle } from './public.js';
 import { mountEditor } from './editor.js';
 import { bindFilterBar, filterBar } from './filterbar.js';
+import { applyBulkEdit, bulkEditDialog, describeBulkEdit } from './bulk-edit.js';
 import { applySolution, solvable, solveMany, summarize } from './solve.js';
 
 const PAGE = 50;
@@ -26,7 +27,7 @@ async function setStatus(list, status) {
   return { saved: out.results.length - failed.length, failed: failed.map((r, i) => r.message ?? r.errors?.[0]?.message ?? 'could not be saved') };
 }
 
-const FILTER_KEYS = ['q', 'status', 'subject', 'chapter', 'topic', 'type', 'language', 'exam', 'year', 'difficulty', 'marks', 'tag'];
+const FILTER_KEYS = ['q', 'status', 'check', 'subject', 'chapter', 'topic', 'type', 'language', 'exam', 'year', 'difficulty', 'marks', 'tag'];
 
 /** The strong "are you sure" for deleting. Typing DELETE is required for several questions or any published one. */
 export function confirmDelete(items) {
@@ -55,11 +56,14 @@ export default async function list(ctx, body) {
   const subject = tax.tree.find((s) => String(s.id) === q.subject);
   const chapter = subject?.chapters.find((c) => String(c.id) === q.chapter);
   const hasFilter = FILTER_KEYS.some((k) => q[k]);
-  const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, language: q.language, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, limit: PAGE, offset: (page - 1) * PAGE }) : null;
+  const res = hasFilter ? await api.search({ q: q.q, subject: q.subject, chapter: q.chapter, topic: q.topic, type: q.type, language: q.language, exam: q.exam, year: q.year, difficulty: q.difficulty, marks: q.marks, tag: q.tag, status: q.status, needsCheck: q.check === '1', limit: PAGE, offset: (page - 1) * PAGE }) : null;
   if (ctx.stale()) return;
   // Which of these were answered by AI and not yet checked (admin only; the public never sees this).
   let flags = {};
   if (res?.items.length) { try { flags = await api.getAiChecks(res.items.map((i) => i.id)); } catch { flags = {}; } }
+  if (ctx.stale()) return;
+  let unchecked = null;                                     // how many answers still wait for a check (shown on the tab)
+  try { unchecked = (await api.adminStats()).ai_unchecked ?? null; } catch { unchecked = null; }
   if (ctx.stale()) return;
   const link = (p) => withQuery('/admin/questions', { ...q, ...p });
   const thisYear = new Date().getFullYear();
@@ -77,9 +81,9 @@ export default async function list(ctx, body) {
   ];
 
   body.innerHTML = html`<div class="page-head"><h1>All questions</h1><a class="btn btn-primary" href="/admin/add">Add questions</a></div>
-    <nav class="tabs" aria-label="Status">${[['', 'All'], ...STATUSES.map((s) => [s, s[0].toUpperCase() + s.slice(1)])].map(([v, l]) => html`<a href="${link({ status: v || null, page: null })}" ${(q.status ?? '') === v ? 'aria-current=page' : ''}>${l}</a>`)}</nav>
-    ${filterBar({ fields, values: Object.fromEntries(FILTER_KEYS.filter((k) => k !== 'status').map((k) => [k, q[k]])) })}
-    ${!hasFilter ? html`<div class="pick-prompt section"><h2>Choose a filter to see questions</h2><p class="muted">Pick a status above (for example <b>Review</b>), or use any dropdown, or type a word or an ID and press Search.</p></div>`
+    <nav class="tabs" aria-label="Status">${[['', 'All'], ...STATUSES.map((s) => [s, s[0].toUpperCase() + s.slice(1)])].map(([v, l]) => html`<a href="${link({ status: v || null, check: null, page: null })}" ${(q.status ?? '') === v && q.check !== '1' ? 'aria-current=page' : ''}>${l}</a>`)}<a href="${link({ status: null, check: '1', page: null })}" data-tab="check" ${q.check === '1' ? 'aria-current=page' : ''}>Needs checking${unchecked === null ? '' : ` (${unchecked})`}</a></nav>
+    ${filterBar({ fields, values: Object.fromEntries(FILTER_KEYS.filter((k) => k !== 'status' && k !== 'check').map((k) => [k, q[k]])) })}
+    ${!hasFilter ? html`<div class="pick-prompt section"><h2>Choose a filter to see questions</h2><p class="muted">Pick a status above (for example <b>Review</b>) or <b>Needs checking</b>, or use any dropdown, or type a word or an ID and press Search.</p></div>`
     : res.items.length ? html`<div class="table-wrap section"><table><thead><tr><th><input type="checkbox" id="all" aria-label="Select all on this page"></th><th>ID</th><th>Question</th><th>Type</th><th>Where</th><th>Status</th><th>Actions</th></tr></thead><tbody>
       ${res.items.map((it) => {
         const s = tax.index.subjectById.get(it.subject_id); const c = tax.index.chapterById.get(it.chapter_id);
@@ -89,15 +93,16 @@ export default async function list(ctx, body) {
           <td data-label="Status"><span class="badge ${it.status}">${it.status}</span>${it.origin === 'ai_image' ? html` <span class="badge ai">AI</span>` : ''}${flags[it.id] ? html` <span class="badge ai" title="The AI wrote this answer. Read it, then press Mark as checked.">AI-solved: check</span>` : ''}</td>
           <td class="actions"><div class="act">${NEXT[it.status].map(([st, l]) => html`<button type="button" class="btn-sm" data-to="${st}">${l}</button>`)}<a class="btn btn-sm" href="/admin/edit/${it.public_id}">Edit</a>${flags[it.id] ? html`<button type="button" class="btn-sm" data-checked>Mark as checked</button>` : ''}<button type="button" class="btn-sm btn-danger" data-del>Delete</button></div></td></tr>`;
       })}</tbody></table></div>
-      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button><button type="button" id="bsolve">Solve with AI…</button><button type="button" id="bcheck">Mark as checked</button><button type="button" class="btn-danger" id="bdel" aria-label="Delete selected questions">Delete…</button></div>
+      <div class="row section" id="bulk"><label for="bs" class="small">With selected:</label><select id="bs"><option value="draft">Move to draft</option><option value="review">Send to review</option><option value="published">Publish</option><option value="archived">Archive</option></select><button type="button" id="bapply">Apply</button><button type="button" id="bedit">Edit selected…</button><button type="button" id="bsolve">Solve with AI…</button><button type="button" id="bcheck">Mark as checked</button><button type="button" class="btn-danger" id="bdel" aria-label="Delete selected questions">Delete…</button></div>
       <div class="pager">${page > 1 ? html`<a class="btn" href="${link({ page: page - 1 })}">Previous</a>` : html`<span></span>`}<span class="muted small">Page ${page}</span>${res.has_more ? html`<a class="btn" href="${link({ page: page + 1 })}">Next</a>` : html`<span></span>`}</div>`
-      : html`<div class="empty-state section"><p><b>No questions match.</b></p><p class="muted">Try other dropdown values, or clear the filters.</p><a class="btn btn-primary" href="/admin/add">Add questions</a></div>`}`.toString();
+      : html`<div class="empty-state section"><p><b>${q.check === '1' ? 'Nothing is waiting for a check.' : 'No questions match.'}</b></p><p class="muted">${q.check === '1' ? 'Every answer written by an AI has been marked as checked, or no filters match.' : 'Try other dropdown values, or clear the filters.'}</p><a class="btn btn-primary" href="/admin/add">Add questions</a></div>`}`.toString();
 
   bindFilterBar(body, (key, v) => {
     const next = { ...v };
     if (key === 'subject') { delete next.chapter; delete next.topic; }
     if (key === 'chapter') delete next.topic;
     if (q.status) next.status = q.status;
+    if (q.check === '1') next.check = '1';
     navigate(withQuery('/admin/questions', next));
   });
   body.querySelector('#all')?.addEventListener('change', (e) => body.querySelectorAll('[data-sel]').forEach((c) => { c.checked = e.target.checked; }));
@@ -127,6 +132,18 @@ export default async function list(ctx, body) {
     try {
       await Promise.all(list.map((x) => api.setAiCheck(x.id, false)));
       toast(`Marked ${list.length} as checked.`, 'ok');
+      navigate(location.pathname + location.search, { replace: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  const editSelected = async (list) => {
+    const ch = await bulkEditDialog({ tax, count: list.length, published: list.filter((x) => x.status === 'published').length });
+    if (!ch) return;
+    const lines = describeBulkEdit(ch, tax);
+    if (!(await confirmDialog({ title: `Apply to ${list.length} question${list.length === 1 ? '' : 's'}?`, body: html`<ul>${lines.map((l) => html`<li>${l}</li>`)}</ul>`, confirmLabel: 'Apply' }))) return;
+    try {
+      const out = await api.saveQuestions('save', list.map((x) => applyBulkEdit(api.toInput(x), ch)), { confirmNear: true });
+      const bad = out.results.map((r, k) => (r.ok ? null : `${list[k].public_id}: ${r.message ?? r.errors?.[0]?.message ?? 'could not be saved'}`)).filter(Boolean);
+      toast(`${out.results.length - bad.length} updated${bad.length ? `, ${bad.length} failed. ${bad[0]}` : ''}.`, bad.length ? 'bad' : 'ok');
       navigate(location.pathname + location.search, { replace: true });
     } catch (e) { toast(e.message, 'bad'); }
   };
@@ -160,10 +177,10 @@ export default async function list(ctx, body) {
     const b = t.closest('[data-to]');
     if (b) run([byPid(b.closest('tr').dataset.pid)], b.dataset.to);
     if (t.closest('[data-del]')) remove([byPid(t.closest('tr').dataset.pid)]);
-    if (t.id === 'bapply' || t.id === 'bdel' || t.id === 'bsolve' || t.id === 'bcheck') {
+    if (t.id === 'bapply' || t.id === 'bdel' || t.id === 'bsolve' || t.id === 'bcheck' || t.id === 'bedit') {
       const sel = [...body.querySelectorAll('[data-sel]:checked')].map((c) => byPid(c.closest('tr').dataset.pid));
       if (!sel.length) { toast('Select at least one question.'); return; }
-      if (t.id === 'bdel') remove(sel); else if (t.id === 'bsolve') solveSaved(sel); else if (t.id === 'bcheck') markChecked(sel.filter((x) => flags[x.id])); else run(sel, body.querySelector('#bs').value);
+      if (t.id === 'bdel') remove(sel); else if (t.id === 'bsolve') solveSaved(sel); else if (t.id === 'bedit') editSelected(sel); else if (t.id === 'bcheck') markChecked(sel.filter((x) => flags[x.id])); else run(sel, body.querySelector('#bs').value);
     }
   });
 }

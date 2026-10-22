@@ -86,12 +86,12 @@ export async function getTaxonomy({ force = false } = {}) {
 }
 export const clearTaxonomyCache = () => { taxCache = null; };
 
-/** @param {{q?,subject?,chapter?,topic?,type?,category?,exam?,year?,difficulty?,marks?,tag?,language?,status?,publicId?,limit?,offset?}} f */
+/** @param {{q?,subject?,chapter?,topic?,type?,category?,exam?,year?,difficulty?,marks?,tag?,language?,status?,needsCheck?,publicId?,limit?,offset?}} f */
 export async function search(f = {}) {
   const args = {
     p_q: f.q || null, p_subject: f.subject || null, p_chapter: f.chapter || null, p_topic: f.topic || null,
     p_type: f.type || null, p_category: f.category || null, p_exam: f.exam || null, p_year: f.year || null,
-    p_difficulty: f.difficulty || null, p_marks: f.marks || null, p_tag: f.tag || null, p_language: f.language || null, p_status: f.status || null,
+    p_difficulty: f.difficulty || null, p_marks: f.marks || null, p_tag: f.tag || null, p_language: f.language || null, p_status: f.status || null, p_needs_check: f.needsCheck ? true : null,
     p_public_id: f.publicId || null, p_limit: f.limit ?? 20, p_offset: f.offset ?? 0,
   };
   const db = signedIn() ? await authed() : need();

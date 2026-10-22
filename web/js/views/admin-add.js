@@ -176,6 +176,7 @@ function jsonTab(host, tax) {
       <div class="field"><label for="d-y">Year</label><input id="d-y" type="text" inputmode="numeric"></div>
       <div class="field"><label for="d-p">Paper / shift</label><input id="d-p" type="text"></div></div>
       <p class="hint">These apply only to questions that do not say it themselves.</p></details>
+    <label class="check"><input type="checkbox" id="ai-ans" checked> The answers in this file were written by an AI. After saving, mark them <b>AI-solved: check</b> so they show up under <b>Needs checking</b>.</label>
     <div id="j-err"></div>
     <div class="row"><button class="btn-primary" type="submit">Check and preview</button></div>
     <details><summary>Format help, example and instructions for another AI</summary><div class="stack mt">
@@ -219,6 +220,7 @@ function jsonTab(host, tax) {
       err.innerHTML = html`<div class="notice bad" role="alert"><b>${result.fatal.message}${at}</b><p class="small">Nothing was imported. Fix the JSON and check again.</p></div>`.toString();
       return;
     }
+    if (host.querySelector('#ai-ans').checked) for (const it of result.items) it.meta = { ...(it.meta ?? {}), answer_source: 'inferred' };
     setDrafts(result, 'import');
     navigate('/admin/review');
   });
