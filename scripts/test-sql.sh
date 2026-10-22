@@ -40,7 +40,7 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
   "${PSQL[@]}" -d qbtest -f "$f"
 done
 # The newest update files say "safe to run twice": prove it.
-for f in "$ROOT"/supabase/migrations/0008_ai_check.sql "$ROOT"/supabase/migrations/0009_language.sql; do
+for f in "$ROOT"/supabase/migrations/0008_ai_check.sql "$ROOT"/supabase/migrations/0009_language.sql "$ROOT"/supabase/migrations/0010_needs_check.sql; do
   echo "== migrate again $(basename "$f")"
   "${PSQL[@]}" -d qbtest -f "$f"
 done

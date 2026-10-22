@@ -95,7 +95,7 @@ Also note your **project reference**: the first part of the URL (`abcdefghijklmn
 2. On your computer open the file `supabase/migrations/0001_schema.sql` in any text editor (Notepad is fine). Select all, copy.
 3. Paste into the SQL editor and click **Run**. You should see **Success. No rows returned**.
 4. Repeat for the next files, **in this order**, each in a fresh query:
-   `0002_security.sql` → `0003_api.sql` → `0004_reference_data.sql` → `0005_starter_taxonomy.sql` → `0006_ai_day_india.sql` → `0007_pictures.sql` → `0008_ai_check.sql` → `0009_language.sql`.
+   `0002_security.sql` → `0003_api.sql` → `0004_reference_data.sql` → `0005_starter_taxonomy.sql` → `0006_ai_day_india.sql` → `0007_pictures.sql` → `0008_ai_check.sql` → `0009_language.sql` → `0010_needs_check.sql`.
 
 `0005` is optional (it is a normal migration file, so if you ever use `npx supabase db push` instead of the SQL editor, it will be applied too; you can then simply delete the rows you do not want in the Taxonomy page). It adds a starter list of Chemistry chapters and exams (CBSE, JEE Main…) so you are not starting from nothing. You can change all of it later in the app. If you want no starter list, skip `0005` and add your own subjects in the Taxonomy page.
 

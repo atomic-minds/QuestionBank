@@ -558,6 +558,26 @@ reset role;
 select test.ok(not exists (select 1 from public.question_ai_check where question_id = :'id_aic'::uuid), 'ai-check: deleted with its question');
 :as_admin
 
+-- ---- "Needs checking" list: admin-only filter in the search, and the count on the dashboard ----------------------
+select (test.save('{"question_text":"Needs-check list: the AI wrote this answer?"}'))->>'id' as id_nc1 \gset
+select (test.save('{"question_text":"Needs-check list: a person wrote this answer?"}'))->>'id' as id_nc2 \gset
+select public_id as pid_nc1 from public.questions where id = :'id_nc1'::uuid \gset
+select public.qb_set_ai_check(:'id_nc1'::uuid, true);
+select test.ok(test.pids(public.qb_search_questions(p_needs_check := true)) = :'pid_nc1', 'needs-check: lists only the flagged question');
+select test.ok((public.qb_admin_stats() ->> 'ai_unchecked')::int = 1, 'needs-check: the dashboard counts the flagged questions');
+select test.ok(test.pids(public.qb_search_questions(p_needs_check := true, p_q := 'person wrote')) = '', 'needs-check: combines with other filters');
+select test.ok(test.pids(public.qb_search_questions(p_needs_check := false, p_q := 'Needs-check list')) like '%' || :'pid_nc1' || '%', 'needs-check: false means no restriction');
+:as_anon
+select test.throws($$select public.qb_search_questions(p_needs_check := true)$$, '42501', 'needs-check: the public cannot use the filter');
+select test.ok(test.pids(public.qb_search_questions(p_q := 'Needs-check list')) = '', 'needs-check: the public search still works and sees no drafts');
+:as_user
+select test.throws($$select public.qb_search_questions(p_needs_check := true)$$, '42501', 'needs-check: a signed-in non-admin cannot use it either');
+:as_admin
+select public.qb_set_ai_check(:'id_nc1'::uuid, false);
+select test.ok(test.pids(public.qb_search_questions(p_needs_check := true)) = '', 'needs-check: marking as checked removes it from the list');
+select test.ok((public.qb_admin_stats() ->> 'ai_unchecked')::int = 0, 'needs-check: the count goes back to zero');
+delete from public.questions where id in (:'id_nc1'::uuid, :'id_nc2'::uuid);
+
 -- ---- Language filter (Bengali / English): worked out by the database from the question text -------------------
 select (test.save('{"question_text":"কোনো গ্যাসের আয়তন ও চাপের সম্পর্ক কী? Write Boyle (PV = k)", "status":"published"}'))->>'id' as id_bn \gset
 select (test.save('{"question_text":"A purely English question about gases in the language test?", "status":"published"}'))->>'id' as id_en \gset

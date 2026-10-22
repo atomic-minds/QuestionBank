@@ -7,7 +7,7 @@ Drives the real website (headless Chromium) against the real database, real Edge
 handlers and a canned Gemini. Prints one line per check and exits non-zero if any failed.
 """
 import json, os, re, struct, sys, zlib, urllib.request
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8787'
 SHOTS = sys.argv[2] if len(sys.argv) > 2 else '/tmp/qb-shots'
@@ -87,7 +87,12 @@ def main():
         page.on('dialog', lambda d: d.dismiss())
 
         PUMP.append(page.wait_for_timeout)
-        def go(path): page.goto(BASE + path); page.wait_for_load_state('networkidle')
+        def go(path):
+            page.goto(BASE + path)
+            # Chromium sometimes never reports "network idle" even though the page is drawn and every request was answered
+            # (seen on pages that fire several requests in a row). The checks that follow wait for the content they need.
+            try: page.wait_for_load_state('networkidle', timeout=8000)
+            except PWTimeout: pass
         def shot(name): page.screenshot(path=f'{SHOTS}/{name}.png', full_page=True)
         def text(): return page.inner_text('body')
         def no_overflow(label):
@@ -1015,6 +1020,80 @@ def main():
             check('JSON tab explains how to use another AI, step by step', page.locator('ol li', has_text='attach your photo').count() == 1 and page.locator('#cp-ai').count() == 1 and 'continue' in text())
             ai_text = page.evaluate("""async () => { const m = await import('/js/views/ai-instructions.js'); const t = await import('/js/api.js'); const tax = await t.getTaxonomy(); return m.buildExternalInstructions(tax); }""")
             check('the copied instructions name this bank\'s own chapters and the answer rules', 'Some Basic Concepts of Chemistry' in ai_text and 'option LETTER only' in ai_text and 'JSON object ONLY' in ai_text, ai_text[:120])
+
+            # ------------------------------------------------------------ "Needs checking" list, pasted-JSON flag, bulk edit
+            ctl(sql="delete from public.questions where question_text like '%(e2e bulk)%'")
+            go('/admin/add?tab=json')
+            check('JSON tab offers to mark the answers as written by an AI, ticked by default', page.locator('#ai-ans').is_checked())
+            page.fill('#json', json.dumps({"questions": [
+                {"type": "short_answer", "question": "Why is the boiling point of water higher than that of H2S? (e2e bulk) first", "answer": "- Hydrogen bonding in water", "subject": "Chemistry", "chapter": "Some Basic Concepts of Chemistry", "tags": ["old-tag", "keep"]},
+                {"type": "short_answer", "question": "State the law of conservation of mass in your own words. (e2e bulk) second", "answer": "- Mass is neither created nor destroyed", "subject": "Chemistry", "chapter": "Some Basic Concepts of Chemistry", "difficulty": "easy"}]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('.item-list')
+            check('pasted JSON answers show "Answer worked out by AI" when the box is ticked', page.locator('.item .badge', has_text='Answer worked out by AI').count() == 2, str(page.locator('.item .badge', has_text='Answer worked out by AI').count()))
+            page.select_option('#st', 'draft'); page.click('[data-act=save]')
+            until(lambda: '/admin/questions' in page.url, 20, 'bulk probes saved')
+            n_flag = ctl(sql="select count(*) from public.question_ai_check c join public.questions q on q.id = c.question_id where q.question_text like '%(e2e bulk)%'")['out'].strip()
+            check('saving them marks both for checking', n_flag.endswith('2'), n_flag)
+            go('/admin')
+            check('dashboard shows how many answers wait for a check, with a link', 'answers to check' in text() and page.locator('a[href="/admin/questions?check=1"]').count() == 1, text()[:300])
+            go('/admin/questions?check=1')
+            check('"Needs checking" tab is current and shows a count', page.locator('.tabs a[aria-current=page]').inner_text().startswith('Needs checking (') , page.locator('.tabs').inner_text())
+            check('the Needs checking list shows only flagged questions', page.locator('tbody tr').count() == page.locator('tbody .badge', has_text='AI-solved: check').count() >= 2 and 'e2e bulk' in page.inner_text('tbody'))
+            page.select_option('#fb-subject', label='Chemistry')
+            until(lambda: 'subject=' in page.url and 'check=1' in page.url, 10, 'check kept with a dropdown')
+            check('choosing a dropdown keeps the Needs checking list', 'check=1' in page.url and page.locator('.tabs a[aria-current=page]').inner_text().startswith('Needs checking'))
+            go('/admin/questions?status=draft')
+            check('the status tabs are not marked current while Needs checking is not chosen', page.locator('.tabs a[aria-current=page]').inner_text() == 'Draft')
+
+            # bulk edit
+            before_ch = ctl(sql="select string_agg(distinct chapter_id::text, ',') from public.questions where question_text like '%(e2e bulk)%'")['out'].strip()
+            go('/admin/questions?check=1&q=e2e+bulk')
+            until(lambda: page.locator('tbody tr').count() == 2, 10, 'two bulk rows')
+            page.click('#all'); page.click('#bedit'); page.wait_for_selector('dialog[open] #be-ok')
+            shot('12-bulk-edit')
+            page.set_viewport_size({'width': 390, 'height': 700}); page.wait_for_timeout(200)
+            dbox = page.evaluate("(() => { const r = document.querySelector('dialog[open]').getBoundingClientRect(); return [r.left, r.right, r.height, innerWidth]; })()")
+            check('bulk edit dialog fits a phone screen', dbox[0] >= -1 and dbox[1] <= dbox[3] + 1, str(dbox)); shot('12-bulk-edit-phone')
+            page.set_viewport_size({'width': 1280, 'height': 900})
+            page.click('#be-ok')
+            check('bulk edit refuses to apply when nothing was changed', 'Change at least one thing' in page.inner_text('#be-err') and page.locator('dialog[open]').count() == 1)
+            page.fill('#be-marks', '-1'); page.click('#be-ok')
+            check('bulk edit refuses bad marks', 'Marks must be a number' in page.inner_text('#be-err'))
+            page.fill('#be-marks', '3'); page.select_option('#be-diff', 'hard'); page.fill('#be-add', 'E2E-Bulk, second tag'); page.fill('#be-del', 'old-tag')
+            page.select_option('#be-s', label='Chemistry')
+            page.click('#be-ok')
+            check('bulk edit asks for a chapter when a subject is chosen', 'Pick the chapter' in page.inner_text('#be-err'))
+            page.select_option('#be-c', index=2)
+            page.click('#be-ok'); page.wait_for_selector('dialog[open] button[value=ok]')
+            conf = page.inner_text('dialog[open]')
+            check('bulk edit confirmation lists every change', all(x in conf for x in ['Difficulty: hard', 'Marks: 3', 'Add tags: e2e-bulk, second-tag', 'Remove tags: old-tag', 'Move to: Chemistry']), conf[:400])
+            page.click('dialog[open] button[value=ok]')
+            until(lambda: ctl(sql="select count(*) from public.questions where question_text like '%(e2e bulk)%' and difficulty = 'hard'")['out'].strip().endswith('2'), 15, 'bulk applied')
+            got = ctl(sql="select string_agg(marks::text || ':' || array_to_string(tags, ','), ' | ' order by question_text) from public.questions where question_text like '%(e2e bulk)%'")['out']
+            check('bulk edit set marks and tags on every selected question and removed the old tag', sorted(re.sub(r'^3(\.0+)?:', '', x) for x in got.strip().split(' | ')) == ['e2e-bulk,second-tag', 'keep,e2e-bulk,second-tag'], got)
+            check('bulk edit kept the other tag and did not duplicate', 'old-tag' not in got and got.count('e2e-bulk') == 2, got)
+            after_ch = ctl(sql="select string_agg(distinct chapter_id::text, ',') from public.questions where question_text like '%(e2e bulk)%'")['out'].strip()
+            check('bulk edit moved the questions to the chosen chapter', after_ch != before_ch and ',' not in after_ch, f'{before_ch} -> {after_ch}')
+            check('bulk edit keeps the status and the check marker', ctl(sql="select count(*) from public.questions q join public.question_ai_check c on c.question_id = q.id where q.question_text like '%(e2e bulk)%' and q.status = 'draft'")['out'].strip().endswith('2'))
+
+            page.set_viewport_size({'width': 390, 'height': 844}); go('/admin/questions?check=1')
+            no_overflow('admin list with the Needs checking tab (phone)'); shot('12-needs-checking-phone')
+            page.set_viewport_size({'width': 1280, 'height': 900})
+            # "Mark as checked" empties the list
+            go('/admin/questions?check=1&q=e2e+bulk')
+            until(lambda: page.locator('tbody tr').count() == 2, 10, 'rows to check')
+            page.click('#all'); page.click('#bcheck')
+            until(lambda: 'Nothing is waiting for a check' in text(), 15, 'checked')
+            check('after marking as checked the Needs checking list is empty', 'Nothing is waiting for a check' in text(), text()[:200])
+            # not ticking the box leaves the answers unflagged
+            go('/admin/add?tab=json'); page.uncheck('#ai-ans')
+            page.fill('#json', json.dumps({"questions": [{"type": "short_answer", "question": "Name the lightest element. (e2e bulk) third", "answer": "- Hydrogen", "subject": "Chemistry", "chapter": "Some Basic Concepts of Chemistry"}]}))
+            page.click('#jf button[type=submit]'); page.wait_for_selector('.item-list')
+            check('with the box unticked the review shows no AI badge', page.locator('.item .badge', has_text='Answer worked out by AI').count() == 0)
+            page.select_option('#st', 'draft'); page.click('[data-act=save]')
+            until(lambda: '/admin/questions' in page.url, 20, 'third saved')
+            check('and that question is not marked for checking', ctl(sql="select count(*) from public.question_ai_check c join public.questions q on q.id = c.question_id where q.question_text like '%(e2e bulk) third%'")['out'].strip().endswith('0'))
+            ctl(sql="delete from public.questions where question_text like '%(e2e bulk)%'")
 
             # ------------------------------------------------------------ session handling
             go('/admin')

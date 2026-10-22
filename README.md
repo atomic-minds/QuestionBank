@@ -26,6 +26,7 @@ New here? Follow **[docs/SETUP-GUIDE.md](docs/SETUP-GUIDE.md)**: a step-by-step 
 * Duplicates: exact duplicates are blocked; near duplicates are flagged with similarity and a link, and need an explicit "this is different" confirmation.
 * Lifecycle: draft → review → published → archived. Only published questions are public.
 * Public site: responsive, light/dark; browse by subject → chapter → topic → type → exam/general; global search (text, tags, or an ID like `QB-CHEM-000123`); a filter bar of dropdowns across the top (subject, chapter, topic, type, exam, year, difficulty, marks, tag) with nothing listed until a filter is chosen; *Show answer* with explanation; shareable links.
+* Admin list: a **Needs checking** tab (with a count, also on the dashboard) lists every answer an AI wrote that you have not marked as checked; **Edit selected…** changes difficulty, marks, tags or the chapter/topic of several questions at once.
 * Admin can delete any question (single, row or bulk) after a strong confirmation (typing DELETE for published or several).
 * Export: JSON (versioned, keeps the bank ID), readable plain text, full backup/restore; by filter or by hand-picked list.
 * Security: admin sign-in, an admin allow-list enforced **inside the database**, row-level security on every table, no secrets in the website, upload checks, size caps, a daily AI cap.
