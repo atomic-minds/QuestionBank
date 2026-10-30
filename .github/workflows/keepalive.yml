@@ -1,21 +1,39 @@
+# Free Supabase projects are paused when they show too little database activity over a week.
+# Supabase says "a few user requests to the database each day" is enough, so this job asks the database
+# five small, read-only questions every day. It costs nothing: GitHub Actions is free for public repos
+# and this job runs for a few seconds. (An earlier version sent ONE request every 3 days: too little.)
+#
+# Setup: repo -> Settings -> Secrets and variables -> Actions -> "Variables" tab, add
+#   SUPABASE_URL              https://<project-ref>.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY  sb_publishable_...   (public key, safe to store as a variable)
 name: keep-supabase-awake
 on:
   schedule:
-    - cron: '17 5 */3 * *'
-  workflow_dispatch: {}
+    - cron: '17 5 * * *'      # every day (GitHub may start it a few hours late)
+  workflow_dispatch: {}       # also lets you press "Run workflow" by hand
 permissions: {}
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Read the taxonomy (public, read-only)
+      - name: Ask the database a few small questions (public, read-only)
         env:
           URL: ${{ vars.SUPABASE_URL }}
           KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: |
           if [ -z "$URL" ] || [ -z "$KEY" ]; then echo "Set the SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY variables."; exit 1; fi
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL/rest/v1/rpc/qb_taxonomy_tree" \
-                 -H "apikey: $KEY" -H 'content-type: application/json' -d '{}')
-          echo "HTTP $code"
-          test "$code" = 200
+          bad=0
+          call() {   # call <function name> <json body>
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$URL/rest/v1/rpc/$1" \
+                   -H "apikey: $KEY" -H 'content-type: application/json' -d "$2")
+            echo "$1 -> HTTP $code"
+            [ "$code" = 200 ] || bad=1
+            sleep 2
+          }
+          call qb_taxonomy_tree '{}'
+          call qb_facets '{}'
+          call qb_search_questions '{"p_limit": 5}'
+          call qb_search_questions '{"p_q": "a", "p_limit": 5}'
+          call qb_search_questions '{"p_language": "bn", "p_limit": 5}'
+          test "$bad" = 0
